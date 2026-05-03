@@ -462,7 +462,7 @@
         }
 
         // ═══════════════════════════════════════
-        // ИЗМЕРИТЕЛЬНАЯ РАМКА
+        // ИЗМЕРИТЕЛЬНАЯ РАМКА 
         // ═══════════════════════════════════════
         function drawFrame() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -470,52 +470,68 @@
             
             const { x, y, w, h } = frame;
             
-            // Затемнение
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.fillRect(0, 0, canvas.width, y);
-            ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
-            ctx.fillRect(0, y, x, h);
-            ctx.fillRect(x + w, y, canvas.width - x - w, h);
+            // Затемнение вне рамки
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(x, y, w, h);
             
-            // Рамка
-            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.setLineDash([]);
+            // Белая рамка
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([]);
             ctx.strokeRect(x, y, w, h);
             
             // Угловые маркеры
             const hs = HANDLE_SIZE;
             const handles = [
-                { cx: x, cy: y, id: 'tl' },
-                { cx: x + w, cy: y, id: 'tr' },
-                { cx: x, cy: y + h, id: 'bl' },
-                { cx: x + w, cy: y + h, id: 'br' }
+                { cx: x, cy: y },
+                { cx: x + w, cy: y },
+                { cx: x, cy: y + h },
+                { cx: x + w, cy: y + h }
             ];
             
             handles.forEach(h => {
+                // Белый круг
                 ctx.fillStyle = '#ffffff';
-                ctx.beginPath(); ctx.arc(h.cx, h.cy, hs / 2, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(h.cx, h.cy, hs / 2, 0, Math.PI * 2);
+                ctx.fill();
+                // Чёрная обводка
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             });
             
-            // Размеры в реальном времени
+            // Размеры
             if (scale) {
                 const widthCm = (w / scale / 10).toFixed(1);
                 const heightCm = (h / scale / 10).toFixed(1);
                 const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(2);
                 
-                ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center';
-                ctx.fillText(`${widthCm} см`, x + w / 2, y - 8);
-                ctx.fillText(`${heightCm} см`, x - 10, y + h / 2);
+                // Подпись ширины сверху рамки
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px system-ui';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${widthCm} см`, x + w / 2, y - 12);
                 
-                // Площадь в центре рамки
-                ctx.fillStyle = 'rgba(0,0,0,0.7)'; 
-                const textW = ctx.measureText(`${areaM2} м²`).width + 16;
-                ctx.fillRect(x + w / 2 - textW / 2, y + h / 2 - 12, textW, 24);
-                ctx.fillStyle = '#fff';
-                ctx.fillText(`${areaM2} м²`, x + w / 2, y + h / 2 + 6);
+                // Подпись высоты слева от рамки (повёрнуто)
+                ctx.save();
+                ctx.translate(x - 16, y + h / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText(`${heightCm} см`, 0, 0);
+                ctx.restore();
+                
+                // Площадь в центре
+                const areaText = `${areaM2} м²`;
+                const textW = ctx.measureText(areaText).width + 20;
+                ctx.fillStyle = 'rgba(0,0,0,0.75)';
+                ctx.fillRect(x + w / 2 - textW / 2, y + h / 2 - 14, textW, 28);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(areaText, x + w / 2, y + h / 2 + 6);
             }
         }
 
-        function getHandle(x, y) {
+        function getHandle(px, py) {
             if (!frame) return null;
             const hs = HANDLE_SIZE;
             const handles = [
@@ -524,21 +540,38 @@
                 { cx: frame.x, cy: frame.y + frame.h, id: 'bl' },
                 { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'br' }
             ];
+            
+            // Сначала проверяем углы (приоритет)
             for (let h of handles) {
-                if (Math.hypot(x - h.cx, y - h.cy) < hs) return h.id;
+                const dist = Math.hypot(px - h.cx, py - h.cy);
+                if (dist < hs * 1.2) return h.id;
             }
-            if (x > frame.x && x < frame.x + frame.w && y > frame.y && y < frame.y + frame.h) return 'move';
+            
+            // Потом проверяем, внутри ли рамки
+            if (px > frame.x && px < frame.x + frame.w && py > frame.y && py < frame.y + frame.h) {
+                return 'move';
+            }
+            
             return null;
         }
 
         function onTouchStart(e) {
-            e.preventDefault();
             if (!frame || currentStep !== 'framing') return;
+            e.preventDefault();
+            e.stopPropagation();
+            
             const touch = e.touches[0];
             const rect = canvas.getBoundingClientRect();
-            const sx = touch.clientX - rect.left;
-            const sy = touch.clientY - rect.top;
+            
+            // Масштабируем координаты touch в координаты canvas
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const sx = (touch.clientX - rect.left) * scaleX;
+            const sy = (touch.clientY - rect.top) * scaleY;
+            
             dragging = getHandle(sx, sy);
+            console.log('Touch start:', sx, sy, 'Handle:', dragging);
+            
             if (dragging) {
                 dragStart = { x: sx, y: sy };
                 frameStart = { ...frame };
@@ -546,97 +579,60 @@
         }
 
         function onTouchMove(e) {
-            e.preventDefault();
             if (!dragging || !frame) return;
+            e.preventDefault();
+            e.stopPropagation();
+            
             const touch = e.touches[0];
             const rect = canvas.getBoundingClientRect();
-            const cx = touch.clientX - rect.left;
-            const cy = touch.clientY - rect.top;
+            
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const cx = (touch.clientX - rect.left) * scaleX;
+            const cy = (touch.clientY - rect.top) * scaleY;
+            
             const dx = cx - dragStart.x;
             const dy = cy - dragStart.y;
             
-            const MIN_SIZE = 80;
+            const MIN_SIZE = 60;
             
             if (dragging === 'move') {
                 frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
                 frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
             } else if (dragging === 'tl') {
-                frame.x = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
-                frame.y = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
-                frame.w = frameStart.x + frameStart.w - frame.x;
-                frame.h = frameStart.y + frameStart.h - frame.y;
+                const newX = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
+                const newY = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
+                frame.w = frameStart.x + frameStart.w - newX;
+                frame.h = frameStart.y + frameStart.h - newY;
+                frame.x = newX;
+                frame.y = newY;
             } else if (dragging === 'tr') {
                 frame.w = Math.max(MIN_SIZE, frameStart.w + dx);
-                frame.y = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
-                frame.h = frameStart.y + frameStart.h - frame.y;
+                const newY = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
+                frame.h = frameStart.y + frameStart.h - newY;
+                frame.y = newY;
             } else if (dragging === 'bl') {
-                frame.x = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
-                frame.w = frameStart.x + frameStart.w - frame.x;
+                const newX = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
+                frame.w = frameStart.x + frameStart.w - newX;
+                frame.x = newX;
                 frame.h = Math.max(MIN_SIZE, frameStart.h + dy);
             } else if (dragging === 'br') {
                 frame.w = Math.max(MIN_SIZE, frameStart.w + dx);
                 frame.h = Math.max(MIN_SIZE, frameStart.h + dy);
             }
+            
             drawFrame();
         }
 
         function onTouchEnd(e) {
-            e.preventDefault();
+            if (dragging) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            console.log('Touch end. Dragging was:', dragging);
             dragging = null;
         }
-
-        function resetFrame() {
-            const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
-            frame = {
-                x: (canvas.width - fw) / 2,
-                y: (canvas.height - fh) / 2,
-                w: fw,
-                h: fh
-            };
-            drawFrame();
-        }
-
-        function finishFraming() {
-            canvas.removeEventListener('touchstart', onTouchStart);
-            canvas.removeEventListener('touchmove', onTouchMove);
-            canvas.removeEventListener('touchend', onTouchEnd);
-            
-            // Расчёт реальных размеров
-            const lengthM = (frame.w / scale / 1000);
-            const heightM = (frame.h / scale / 1000);
-            const area = lengthM * heightM;
-            
-            document.getElementById('resLength').textContent = lengthM.toFixed(2) + ' м';
-            document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м';
-            document.getElementById('resArea').textContent = area.toFixed(2) + ' м²';
-            document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
-            document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
-            document.getElementById('resTip').textContent = area > 12
-                ? '👍 Просторная стена. Поместится диван 3 м и шкаф 1.8 м.'
-                : '⚠️ Компактная стена. Рекомендуем мебель не длиннее 2 м.';
-            
-            resultsDiv.classList.add('visible');
-            currentStep = 'done';
-            statusDiv.textContent = 'Замер выполнен!';
-            statusDiv.className = 'status-bar';
-            actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Замерить заново</button>`;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-
-        function resetAll() {
-            if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
-            canvas.removeEventListener('touchstart', onTouchStart);
-            canvas.removeEventListener('touchmove', onTouchMove);
-            canvas.removeEventListener('touchend', onTouchEnd);
-            scale = null; frame = null; dragging = null;
-            currentStep = 'ready';
-            statusDiv.textContent = 'Камера готова. Откалибруйте по карте.';
-            statusDiv.className = 'status-bar ready';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Откалибровать</button>`;
-            resultsDiv.classList.remove('visible');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-
+        
         // ═══════════════════════════════════════
         // ОЧИСТКА
         // ═══════════════════════════════════════
