@@ -29,376 +29,423 @@
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
-        .results .row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 5px 0; color: #ccc; }
-        .results .row span:last-child { font-weight: 600; color: #fff; }
-        .results .tip { margin-top: 8px; font-size: 0.8rem; color: #aaa; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; }
+        .results .row { display: flex; justify-content: space-between; font-size: 0.9rem; padding: 6px 0; color: #ccc; }
+        .results .row span:last-child { font-weight: 600; color: #fff; font-size: 1rem; }
+        .results .tip { margin-top: 8px; font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; }
     </style>
 </head>
 <body>
 
-    <div class="viewfinder" id="viewfinder">
-        <video id="video" autoplay playsinline muted></video>
-        <canvas id="canvas"></canvas>
+<div class="viewfinder" id="viewfinder">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+</div>
+
+<div class="ui-overlay">
+    <div class="header">
+        <h1>Глаз прораба</h1>
+        <div class="sub">Калибровка по монете • Измерение любых объектов</div>
     </div>
-
-    <div class="ui-overlay">
-        <div class="header">
-            <h1>Глаз прораба</h1>
-            <div class="sub">Калибровка по карте • Ручная рамка</div>
-        </div>
-        <div class="lux-indicator" id="luxDisplay">-- lx</div>
-        <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
-        <div class="action-area" id="actionArea">
-            <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
-        </div>
-        <div class="results" id="results">
-            <div class="row"><span>Длина стены:</span><span id="resLength">—</span></div>
-            <div class="row"><span>Высота стены:</span><span id="resHeight">—</span></div>
-            <div class="row"><span>Площадь:</span><span id="resArea">—</span></div>
-            <div class="row"><span>Освещённость:</span><span id="resLux">—</span></div>
-            <div class="row"><span>Ближайший RAL:</span><span id="resRAL">—</span></div>
-            <div class="tip" id="resTip"></div>
-        </div>
+    <div class="lux-indicator" id="luxDisplay">-- lx</div>
+    <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
+    <div class="action-area" id="actionArea">
+        <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
     </div>
+    <div class="results" id="results">
+        <div class="row"><span>Ширина области:</span><span id="resWidth">—</span></div>
+        <div class="row"><span>Высота области:</span><span id="resHeight">—</span></div>
+        <div class="row"><span>Площадь:</span><span id="resArea">—</span></div>
+        <div class="row"><span>Освещённость:</span><span id="resLux">—</span></div>
+        <div class="row"><span>Ближайший RAL:</span><span id="resRAL">—</span></div>
+        <div class="tip" id="resTip"></div>
+    </div>
+</div>
 
-    <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const statusDiv = document.getElementById('status');
-        const actionArea = document.getElementById('actionArea');
-        const resultsDiv = document.getElementById('results');
-        const luxDisplay = document.getElementById('luxDisplay');
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    const actionArea = document.getElementById('actionArea');
+    const resultsDiv = document.getElementById('results');
+    const luxDisplay = document.getElementById('luxDisplay');
 
-        let stream, currentStep = 'idle', scale = null, currentLux = null, ambientSensor = null, isRequesting = false;
-        let calibrationFrameId = null, stableCount = 0;
-        const STABLE_THRESHOLD = 10;
-        const CARD_ASPECT = 86 / 54;
-        const CARD_WIDTH_MM = 86;
+    let stream, currentStep = 'idle', scale = null, currentLux = null, ambientSensor = null, isRequesting = false;
+    let calibrationFrameId = null, stableCount = 0;
+    const STABLE_THRESHOLD = 10;
+    const COIN_DIAMETER_MM = 25; // 5 рублей
 
-        // Измерительная рамка
-        let frame = null, dragging = null, dragStart = {}, frameStart = {};
-        const HANDLE_SIZE = 36;
+    let frame = null, dragging = null, dragStart = {}, frameStart = {};
+    const HANDLE_SIZE = 40;
 
-        // ═══════════ КАМЕРА ═══════════
-        function handleAction() {
-            if (isRequesting) return;
-            switch (currentStep) {
-                case 'idle': startCamera(); break;
-                case 'ready': startCalibration(); break;
-                case 'calibrating': captureCalibration(); break;
-                case 'framing': finishFraming(); break;
-                case 'done': resetAll(); break;
-            }
+    function handleAction() {
+        if (isRequesting) return;
+        switch (currentStep) {
+            case 'idle': startCamera(); break;
+            case 'ready': startCalibration(); break;
+            case 'calibrating': captureCalibration(); break;
+            case 'framing': finishFraming(); break;
+            case 'done': resetAll(); break;
         }
+    }
 
-        async function startCamera() {
-            isRequesting = true;
-            statusDiv.textContent = 'Запрашиваю камеру...';
-            const configs = [
-                { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
-                { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
-                { video: { facingMode: 'environment' } },
-                { video: true }
-            ];
-            for (let c of configs) {
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia(c);
-                    video.srcObject = stream;
-                    await video.play();
-                    canvas.width = video.videoWidth || canvas.clientWidth;
-                    canvas.height = video.videoHeight || canvas.clientHeight;
-                    statusDiv.textContent = 'Наведите камеру на карту для калибровки.';
-                    statusDiv.className = 'status-bar ready';
-                    actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Откалибровать</button>`;
-                    currentStep = 'ready';
-                    isRequesting = false;
-                    startAmbientSensor();
-                    return;
-                } catch (err) { if (err.name === 'NotAllowedError') break; }
-            }
-            statusDiv.textContent = 'Ошибка доступа к камере.';
-            statusDiv.className = 'status-bar error';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Попробовать снова</button>`;
-            isRequesting = false;
-        }
-
-        function startAmbientSensor() {
-            if ('AmbientLightSensor' in window) {
-                try {
-                    ambientSensor = new AmbientLightSensor();
-                    ambientSensor.onreading = () => { currentLux = Math.round(ambientSensor.illuminance); luxDisplay.textContent = currentLux + ' lx'; };
-                    ambientSensor.onerror = () => { luxDisplay.textContent = '-- lx'; };
-                    ambientSensor.start();
-                } catch (e) { luxDisplay.textContent = '-- lx'; }
-            } else { luxDisplay.textContent = '-- lx'; }
-        }
-
-        // ═══════════ КАЛИБРОВКА: ФИКСИРОВАННЫЙ ПРИЦЕЛ + АВТО-ЗАХВАТ ПО ЯРКОСТИ ═══════════
-        function startCalibration() {
-            currentStep = 'calibrating';
-            statusDiv.textContent = 'Совместите карту с рамкой. Держите ровно.';
-            statusDiv.className = 'status-bar';
-            actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Захватить вручную</button>`;
-            stableCount = 0;
-            detectCardLoop();
-        }
-
-        function detectCardLoop() {
-            if (currentStep !== 'calibrating') return;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Размеры прицела
-            const frameW = canvas.width * 0.6;
-            const frameH = frameW / CARD_ASPECT;
-            const fx = (canvas.width - frameW) / 2;
-            const fy = (canvas.height - frameH) / 2;
-
-            // Анализ яркости внутри и снаружи
-            const imageData = ctx.getImageData(fx, fy, frameW, frameH);
-            let innerBright = 0;
-            for (let i = 0; i < imageData.data.length; i += 4) {
-                innerBright += (imageData.data[i] + imageData.data[i+1] + imageData.data[i+2]) / 3;
-            }
-            innerBright /= (imageData.data.length / 4);
-
-            // Снаружи: полоски слева, справа, сверху, снизу
-            const outerSamples = [
-                ctx.getImageData(Math.max(0, fx - 20), fy, 20, frameH),
-                ctx.getImageData(fx + frameW, fy, 20, frameH),
-                ctx.getImageData(fx, Math.max(0, fy - 20), frameW, 20),
-                ctx.getImageData(fx, fy + frameH, frameW, 20)
-            ];
-            let outerBright = 0, outerPixels = 0;
-            outerSamples.forEach(sample => {
-                for (let i = 0; i < sample.data.length; i += 4) {
-                    outerBright += (sample.data[i] + sample.data[i+1] + sample.data[i+2]) / 3;
-                    outerPixels++;
-                }
-            });
-            outerBright /= outerPixels;
-
-            const cardDetected = innerBright > 130 && (innerBright - outerBright) > 40;
-
-            // Рисуем прицел
-            if (cardDetected) {
-                stableCount++;
-                ctx.strokeStyle = stableCount >= STABLE_THRESHOLD ? '#00ff88' : '#ffdd57';
-                ctx.lineWidth = 4;
-                ctx.shadowColor = stableCount >= STABLE_THRESHOLD ? '#00ff88' : '#ffdd57';
-                ctx.shadowBlur = 12;
-                ctx.strokeRect(fx, fy, frameW, frameH);
-                ctx.shadowBlur = 0;
-                statusDiv.textContent = stableCount >= STABLE_THRESHOLD ? '✅ Захвачено! Не двигайте телефон.' : 'Держите ровно...';
+    async function startCamera() {
+        isRequesting = true;
+        statusDiv.textContent = 'Запрашиваю камеру...';
+        const configs = [
+            { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+            { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
+            { video: { facingMode: 'environment' } },
+            { video: true }
+        ];
+        for (let c of configs) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(c);
+                video.srcObject = stream;
+                await video.play();
+                canvas.width = video.videoWidth || canvas.clientWidth;
+                canvas.height = video.videoHeight || canvas.clientHeight;
+                statusDiv.textContent = 'Наведите камеру на монету 5₽ для калибровки.';
                 statusDiv.className = 'status-bar ready';
+                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Калибровать</button>`;
+                currentStep = 'ready';
+                isRequesting = false;
+                startAmbientSensor();
+                return;
+            } catch (err) { if (err.name === 'NotAllowedError') break; }
+        }
+        statusDiv.textContent = 'Ошибка доступа к камере. Проверьте разрешения.';
+        statusDiv.className = 'status-bar error';
+        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Попробовать снова</button>`;
+        isRequesting = false;
+    }
 
-                if (stableCount >= STABLE_THRESHOLD) {
-                    scale = frameW / CARD_WIDTH_MM;
-                    onCalibrated();
-                    return;
+    function startAmbientSensor() {
+        if ('AmbientLightSensor' in window) {
+            try {
+                ambientSensor = new AmbientLightSensor();
+                ambientSensor.onreading = () => { currentLux = Math.round(ambientSensor.illuminance); luxDisplay.textContent = currentLux + ' lx'; };
+                ambientSensor.onerror = () => { luxDisplay.textContent = '-- lx'; };
+                ambientSensor.start();
+            } catch (e) { luxDisplay.textContent = '-- lx'; }
+        } else { luxDisplay.textContent = '-- lx'; }
+    }
+
+    // ── КАЛИБРОВКА ПО МОНЕТЕ ──
+    function startCalibration() {
+        currentStep = 'calibrating';
+        statusDiv.textContent = 'Совместите монету с круглой рамкой. Держите ровно.';
+        statusDiv.className = 'status-bar';
+        actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Захватить вручную</button>`;
+        stableCount = 0;
+        detectCoinLoop();
+    }
+
+    function detectCoinLoop() {
+        if (currentStep !== 'calibrating') return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Круглая рамка-прицел по центру
+        const radius = canvas.width * 0.22; // диаметр ~44% экрана
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        // Анализ яркости: внутри круга vs снаружи
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let innerSum = 0, innerCount = 0;
+        let outerSum = 0, outerCount = 0;
+
+        for (let y = 0; y < canvas.height; y += 3) {
+            for (let x = 0; x < canvas.width; x += 3) {
+                const dist = Math.hypot(x - cx, y - cy);
+                const idx = (y * canvas.width + x) * 4;
+                const bright = (imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2]) / 3;
+                
+                if (dist < radius * 0.85) {
+                    innerSum += bright;
+                    innerCount++;
+                } else if (dist > radius * 1.2 && dist < radius * 1.6) {
+                    outerSum += bright;
+                    outerCount++;
                 }
-            } else {
-                stableCount = 0;
-                // Затемнение
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                ctx.fillRect(0, 0, canvas.width, fy);
-                ctx.fillRect(0, fy + frameH, canvas.width, canvas.height - fy - frameH);
-                ctx.fillRect(0, fy, fx, frameH);
-                ctx.fillRect(fx + frameW, fy, canvas.width - fx - frameW, frameH);
-                // Рамка
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([8, 4]);
-                ctx.strokeRect(fx, fy, frameW, frameH);
-                ctx.setLineDash([]);
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 14px system-ui';
-                ctx.textAlign = 'center';
-                ctx.fillText('Поместите карту в рамку', canvas.width / 2, fy - 10);
-                statusDiv.textContent = 'Совместите карту с белой рамкой.';
-                statusDiv.className = 'status-bar';
             }
-
-            calibrationFrameId = requestAnimationFrame(detectCardLoop);
         }
 
-        function captureCalibration() {
-            // Ручной захват
-            const frameW = canvas.width * 0.6;
-            scale = frameW / CARD_WIDTH_MM;
-            onCalibrated();
-        }
+        const innerBright = innerSum / Math.max(innerCount, 1);
+        const outerBright = outerSum / Math.max(outerCount, 1);
+        const coinDetected = innerBright > 120 && (innerBright - outerBright) > 35;
 
-        function onCalibrated() {
-            if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
-            frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
-
-            currentStep = 'framing';
-            statusDiv.textContent = '📐 Растяните рамку по углам стены.';
+        // Рисуем прицел
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        
+        if (coinDetected) {
+            stableCount++;
+            const color = stableCount >= STABLE_THRESHOLD ? '#00ff88' : '#ffdd57';
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 5;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 18;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            
+            statusDiv.textContent = stableCount >= STABLE_THRESHOLD ? '✅ Захвачено! Не двигайте телефон.' : 'Держите ровно...';
             statusDiv.className = 'status-bar ready';
-            actionArea.innerHTML = `
-                <button class="btn secondary" onclick="resetFrame()">↺ Сброс</button>
-                <button class="btn" id="actionBtn" onclick="handleAction()">✓ Завершить</button>
-            `;
 
-            drawFrame();
-            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-            canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-            canvas.addEventListener('touchend', onTouchEnd);
-        }
-
-        // ═══════════ ИЗМЕРИТЕЛЬНАЯ РАМКА ═══════════
-        function drawFrame() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (!frame) return;
-            const { x, y, w, h } = frame;
-
-            ctx.fillStyle = 'rgba(0,0,0,0.35)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.clearRect(x, y, w, h);
-            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.setLineDash([]);
-            ctx.strokeRect(x, y, w, h);
-
-            const hs = HANDLE_SIZE;
-            [[x, y], [x+w, y], [x, y+h], [x+w, y+h]].forEach(([cx, cy]) => {
-                ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, hs/2, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
-            });
-
-            if (scale) {
-                const wCm = (w / scale / 10).toFixed(1);
-                const hCm = (h / scale / 10).toFixed(1);
-                const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(2);
-                ctx.fillStyle = '#fff'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
-                ctx.fillText(`${wCm} см`, x + w/2, y - 12);
-                ctx.save(); ctx.translate(x - 16, y + h/2); ctx.rotate(-Math.PI/2);
-                ctx.fillText(`${hCm} см`, 0, 0); ctx.restore();
-                const areaText = `${areaM2} м²`;
-                const tw = ctx.measureText(areaText).width + 20;
-                ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(x + w/2 - tw/2, y + h/2 - 14, tw, 28);
-                ctx.fillStyle = '#fff'; ctx.fillText(areaText, x + w/2, y + h/2 + 6);
+            if (stableCount >= STABLE_THRESHOLD) {
+                scale = (radius * 2) / COIN_DIAMETER_MM;
+                onCalibrated();
+                return;
             }
-        }
-
-        function getHandle(px, py) {
-            if (!frame) return null;
-            const hs = HANDLE_SIZE;
-            const handles = [
-                { cx: frame.x, cy: frame.y, id: 'tl' },
-                { cx: frame.x + frame.w, cy: frame.y, id: 'tr' },
-                { cx: frame.x, cy: frame.y + frame.h, id: 'bl' },
-                { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'br' }
-            ];
-            for (let h of handles) {
-                if (Math.hypot(px - h.cx, py - h.cy) < hs * 1.2) return h.id;
-            }
-            if (px > frame.x && px < frame.x + frame.w && py > frame.y && py < frame.y + frame.h) return 'move';
-            return null;
-        }
-
-        function onTouchStart(e) {
-            if (!frame || currentStep !== 'framing') return;
-            e.preventDefault(); e.stopPropagation();
-            const touch = e.touches[0];
-            const rect = canvas.getBoundingClientRect();
-            const sx = (touch.clientX - rect.left) * (canvas.width / rect.width);
-            const sy = (touch.clientY - rect.top) * (canvas.height / rect.height);
-            dragging = getHandle(sx, sy);
-            if (dragging) {
-                dragStart = { x: sx, y: sy };
-                frameStart = { ...frame };
-            }
-        }
-
-        function onTouchMove(e) {
-            if (!dragging || !frame) return;
-            e.preventDefault(); e.stopPropagation();
-            const touch = e.touches[0];
-            const rect = canvas.getBoundingClientRect();
-            const cx = (touch.clientX - rect.left) * (canvas.width / rect.width);
-            const cy = (touch.clientY - rect.top) * (canvas.height / rect.height);
-            const dx = cx - dragStart.x, dy = cy - dragStart.y;
-            const MIN = 60;
-
-            if (dragging === 'move') {
-                frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
-                frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
-            } else if (dragging === 'tl') {
-                const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
-                const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
-                frame.w = frameStart.x + frameStart.w - nx; frame.h = frameStart.y + frameStart.h - ny;
-                frame.x = nx; frame.y = ny;
-            } else if (dragging === 'tr') {
-                frame.w = Math.max(MIN, frameStart.w + dx);
-                const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
-                frame.h = frameStart.y + frameStart.h - ny; frame.y = ny;
-            } else if (dragging === 'bl') {
-                const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
-                frame.w = frameStart.x + frameStart.w - nx; frame.x = nx;
-                frame.h = Math.max(MIN, frameStart.h + dy);
-            } else if (dragging === 'br') {
-                frame.w = Math.max(MIN, frameStart.w + dx);
-                frame.h = Math.max(MIN, frameStart.h + dy);
-            }
-            drawFrame();
-        }
-
-        function onTouchEnd(e) { dragging = null; }
-
-        function resetFrame() {
-            const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
-            frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
-            drawFrame();
-        }
-
-        function finishFraming() {
-            canvas.removeEventListener('touchstart', onTouchStart);
-            canvas.removeEventListener('touchmove', onTouchMove);
-            canvas.removeEventListener('touchend', onTouchEnd);
-            const lengthM = (frame.w / scale / 1000);
-            const heightM = (frame.h / scale / 1000);
-            const area = lengthM * heightM;
-            document.getElementById('resLength').textContent = lengthM.toFixed(2) + ' м';
-            document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м';
-            document.getElementById('resArea').textContent = area.toFixed(2) + ' м²';
-            document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
-            document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
-            document.getElementById('resTip').textContent = area > 12 ? '👍 Просторная стена. Поместится диван 3 м и шкаф 1.8 м.' : '⚠️ Компактная стена. Рекомендуем мебель не длиннее 2 м.';
-            resultsDiv.classList.add('visible');
-            currentStep = 'done';
-            statusDiv.textContent = 'Замер выполнен! Не двигайте телефон для точности.';
+        } else {
+            stableCount = 0;
+            
+            // Затемнение вне круга
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)';
+            ctx.fill();
+            ctx.restore();
+            
+            // Рамка
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([10, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Перекрестие
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx - radius - 15, cy); ctx.lineTo(cx + radius + 15, cy);
+            ctx.moveTo(cx, cy - radius - 15); ctx.lineTo(cx, cy + radius + 15);
+            ctx.stroke();
+            
+            // Текст
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 18px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('Поместите монету в круг', cx, cy - radius - 20);
+            
+            statusDiv.textContent = 'Совместите монету 5₽ с круглой рамкой.';
             statusDiv.className = 'status-bar';
-            actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Замерить заново</button>`;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
 
-        function resetAll() {
-            if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
-            canvas.removeEventListener('touchstart', onTouchStart);
-            canvas.removeEventListener('touchmove', onTouchMove);
-            canvas.removeEventListener('touchend', onTouchEnd);
-            scale = null; frame = null; dragging = null;
-            currentStep = 'ready';
-            statusDiv.textContent = 'Наведите камеру на карту для калибровки.';
-            statusDiv.className = 'status-bar ready';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Откалибровать</button>`;
-            resultsDiv.classList.remove('visible');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
+        calibrationFrameId = requestAnimationFrame(detectCoinLoop);
+    }
 
-        // Очистка
-        window.addEventListener('beforeunload', () => {
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            if (ambientSensor) ambientSensor.stop();
-            if (calibrationFrameId) cancelAnimationFrame(calibrationFrameId);
+    function captureCalibration() {
+        const radius = canvas.width * 0.22;
+        scale = (radius * 2) / COIN_DIAMETER_MM;
+        onCalibrated();
+    }
+
+    function onCalibrated() {
+        if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
+        frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
+
+        currentStep = 'framing';
+        statusDiv.textContent = '📐 Растяните рамку по границам объекта.';
+        statusDiv.className = 'status-bar ready';
+        actionArea.innerHTML = `
+            <button class="btn secondary" onclick="resetFrame()">↺ Сброс</button>
+            <button class="btn" id="actionBtn" onclick="handleAction()">✓ Завершить</button>
+        `;
+
+        drawFrame();
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+        canvas.addEventListener('touchend', onTouchEnd);
+    }
+
+    // ── ИЗМЕРИТЕЛЬНАЯ РАМКА ──
+    function drawFrame() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!frame) return;
+        const { x, y, w, h } = frame;
+
+        // Затемнение
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(x, y, w, h);
+
+        // Белая рамка
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x, y, w, h);
+
+        // Угловые маркеры
+        const hs = HANDLE_SIZE;
+        [[x, y], [x+w, y], [x, y+h], [x+w, y+h]].forEach(([cx, cy]) => {
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(cx, cy, hs/2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            ctx.stroke();
         });
-        document.addEventListener('dblclick', () => {
-            if (document.fullscreenElement) document.exitFullscreen();
-            else document.body.requestFullscreen().catch(() => {});
-        });
-    </script>
+
+        // Размеры — крупный шрифт с тенью
+        if (scale) {
+            const wCm = (w / scale / 10).toFixed(1);
+            const hCm = (h / scale / 10).toFixed(1);
+            const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(2);
+
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 22px system-ui';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'rgba(255,255,255,0.9)';
+            ctx.shadowBlur = 6;
+
+            // Ширина сверху
+            ctx.fillText(`${wCm} см`, x + w/2, y - 14);
+            // Высота слева
+            ctx.save();
+            ctx.translate(x - 22, y + h/2);
+            ctx.rotate(-Math.PI/2);
+            ctx.fillText(`${hCm} см`, 0, 0);
+            ctx.restore();
+            
+            ctx.shadowBlur = 0;
+
+            // Площадь в центре
+            const areaText = `${areaM2} м²`;
+            const tw = ctx.measureText(areaText).width + 24;
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(x + w/2 - tw/2, y + h/2 - 16, tw, 32);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px system-ui';
+            ctx.fillText(areaText, x + w/2, y + h/2 + 8);
+        }
+    }
+
+    function getHandle(px, py) {
+        if (!frame) return null;
+        const hs = HANDLE_SIZE;
+        const handles = [
+            { cx: frame.x, cy: frame.y, id: 'tl' },
+            { cx: frame.x + frame.w, cy: frame.y, id: 'tr' },
+            { cx: frame.x, cy: frame.y + frame.h, id: 'bl' },
+            { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'br' }
+        ];
+        for (let h of handles) {
+            if (Math.hypot(px - h.cx, py - h.cy) < hs * 1.3) return h.id;
+        }
+        if (px > frame.x && px < frame.x + frame.w && py > frame.y && py < frame.y + frame.h) return 'move';
+        return null;
+    }
+
+    function onTouchStart(e) {
+        if (!frame || currentStep !== 'framing') return;
+        e.preventDefault(); e.stopPropagation();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const sx = (touch.clientX - rect.left) * (canvas.width / rect.width);
+        const sy = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        dragging = getHandle(sx, sy);
+        if (dragging) {
+            dragStart = { x: sx, y: sy };
+            frameStart = { ...frame };
+        }
+    }
+
+    function onTouchMove(e) {
+        if (!dragging || !frame) return;
+        e.preventDefault(); e.stopPropagation();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const cx = (touch.clientX - rect.left) * (canvas.width / rect.width);
+        const cy = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        const dx = cx - dragStart.x, dy = cy - dragStart.y;
+        const MIN = 50;
+
+        if (dragging === 'move') {
+            frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
+            frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
+        } else if (dragging === 'tl') {
+            const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
+            const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
+            frame.w = frameStart.x + frameStart.w - nx; frame.h = frameStart.y + frameStart.h - ny;
+            frame.x = nx; frame.y = ny;
+        } else if (dragging === 'tr') {
+            frame.w = Math.max(MIN, frameStart.w + dx);
+            const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
+            frame.h = frameStart.y + frameStart.h - ny; frame.y = ny;
+        } else if (dragging === 'bl') {
+            const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
+            frame.w = frameStart.x + frameStart.w - nx; frame.x = nx;
+            frame.h = Math.max(MIN, frameStart.h + dy);
+        } else if (dragging === 'br') {
+            frame.w = Math.max(MIN, frameStart.w + dx);
+            frame.h = Math.max(MIN, frameStart.h + dy);
+        }
+        drawFrame();
+    }
+
+    function onTouchEnd(e) { dragging = null; }
+
+    function resetFrame() {
+        const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
+        frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
+        drawFrame();
+    }
+
+    function finishFraming() {
+        canvas.removeEventListener('touchstart', onTouchStart);
+        canvas.removeEventListener('touchmove', onTouchMove);
+        canvas.removeEventListener('touchend', onTouchEnd);
+        
+        const widthM = (frame.w / scale / 1000);
+        const heightM = (frame.h / scale / 1000);
+        const area = widthM * heightM;
+        
+        document.getElementById('resWidth').textContent = widthM.toFixed(2) + ' м (' + (widthM*100).toFixed(0) + ' см)';
+        document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м (' + (heightM*100).toFixed(0) + ' см)';
+        document.getElementById('resArea').textContent = area.toFixed(3) + ' м²';
+        document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
+        document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
+        document.getElementById('resTip').textContent = area > 5 
+            ? '👍 Большая область. Поместится диван 3 м и шкаф 1.8 м.'
+            : '⚠️ Компактная область. Рекомендуем мебель не длиннее 2 м.';
+        
+        resultsDiv.classList.add('visible');
+        currentStep = 'done';
+        statusDiv.textContent = 'Измерение выполнено!';
+        statusDiv.className = 'status-bar';
+        actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Измерить заново</button>`;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function resetAll() {
+        if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
+        canvas.removeEventListener('touchstart', onTouchStart);
+        canvas.removeEventListener('touchmove', onTouchMove);
+        canvas.removeEventListener('touchend', onTouchEnd);
+        scale = null; frame = null; dragging = null;
+        currentStep = 'ready';
+        statusDiv.textContent = 'Наведите камеру на монету 5₽ для калибровки.';
+        statusDiv.className = 'status-bar ready';
+        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Калибровать</button>`;
+        resultsDiv.classList.remove('visible');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    window.addEventListener('beforeunload', () => {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        if (ambientSensor) ambientSensor.stop();
+        if (calibrationFrameId) cancelAnimationFrame(calibrationFrameId);
+    });
+    document.addEventListener('dblclick', () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.body.requestFullscreen().catch(() => {});
+    });
+</script>
 </body>
 </html>
