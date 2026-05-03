@@ -16,14 +16,14 @@
         .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: flex-end; }
         .ui-overlay > * { pointer-events: auto; }
         .header { position: absolute; top: 12px; left: 0; right: 0; text-align: center; z-index: 11; }
-        .header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
-        .header .sub { font-size: 0.7rem; color: rgba(255,255,255,0.7); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+        .header h1 { font-size: 1.2rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
+        .header .sub { font-size: 0.75rem; color: rgba(255,255,255,0.7); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
         .lux-indicator { position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.6); color: #ffd966; font-size: 0.7rem; padding: 5px 12px; border-radius: 20px; z-index: 12; backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); }
-        .status-bar { text-align: center; padding: 0 20px 8px; font-size: 0.85rem; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 24px; transition: color 0.3s; }
+        .status-bar { text-align: center; padding: 0 20px 8px; font-size: 0.9rem; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 24px; transition: color 0.3s; }
         .status-bar.ready { color: #4caf50; font-weight: 500; }
         .status-bar.error { color: #ff6b6b; font-weight: 500; }
         .action-area { padding: 0 16px 20px; display: flex; gap: 8px; }
-        .btn { display: block; flex: 1; padding: 14px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; }
+        .btn { display: block; flex: 1; padding: 14px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; }
         .btn:active { opacity: 0.85; }
         .btn:disabled { background: rgba(58,58,58,0.8); color: #999; cursor: not-allowed; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
@@ -44,7 +44,7 @@
 <div class="ui-overlay">
     <div class="header">
         <h1>Глаз прораба</h1>
-        <div class="sub">Калибровка по монете • Измерение любых объектов</div>
+        <div class="sub">Стоп-кадр • Монета • Высокая точность</div>
     </div>
     <div class="lux-indicator" id="luxDisplay">-- lx</div>
     <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
@@ -52,8 +52,8 @@
         <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
     </div>
     <div class="results" id="results">
-        <div class="row"><span>Ширина области:</span><span id="resWidth">—</span></div>
-        <div class="row"><span>Высота области:</span><span id="resHeight">—</span></div>
+        <div class="row"><span>Ширина объекта:</span><span id="resWidth">—</span></div>
+        <div class="row"><span>Высота объекта:</span><span id="resHeight">—</span></div>
         <div class="row"><span>Площадь:</span><span id="resArea">—</span></div>
         <div class="row"><span>Освещённость:</span><span id="resLux">—</span></div>
         <div class="row"><span>Ближайший RAL:</span><span id="resRAL">—</span></div>
@@ -70,21 +70,25 @@
     const resultsDiv = document.getElementById('results');
     const luxDisplay = document.getElementById('luxDisplay');
 
-    let stream, currentStep = 'idle', scale = null, currentLux = null, ambientSensor = null, isRequesting = false;
-    let calibrationFrameId = null, stableCount = 0;
-    const STABLE_THRESHOLD = 10;
+    let stream, currentStep = 'idle', currentLux = null, ambientSensor = null, isRequesting = false;
+    
+    // Данные стоп-кадра
+    let frozenImageData = null;
+    let coinDiameterPx = null; // диаметр монеты в пикселях на стоп-кадре
     const COIN_DIAMETER_MM = 25; // 5 рублей
-
+    
+    // Измерительная рамка (объект)
     let frame = null, dragging = null, dragStart = {}, frameStart = {};
-    const HANDLE_SIZE = 40;
+    // Рамка монеты (окружность)
+    let coinFrame = null, draggingCoin = false, coinDragStart = {}, coinFrameStart = {};
+    const HANDLE_SIZE = 44;
 
     function handleAction() {
         if (isRequesting) return;
         switch (currentStep) {
             case 'idle': startCamera(); break;
-            case 'ready': startCalibration(); break;
-            case 'calibrating': captureCalibration(); break;
-            case 'framing': finishFraming(); break;
+            case 'ready': freezeFrame(); break;
+            case 'framing': finishMeasurement(); break;
             case 'done': resetAll(); break;
         }
     }
@@ -105,9 +109,9 @@
                 await video.play();
                 canvas.width = video.videoWidth || canvas.clientWidth;
                 canvas.height = video.videoHeight || canvas.clientHeight;
-                statusDiv.textContent = 'Наведите камеру на монету 5₽ для калибровки.';
+                statusDiv.textContent = 'Разместите монету на объекте. Нажмите «Снять».';
                 statusDiv.className = 'status-bar ready';
-                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Калибровать</button>`;
+                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять кадр</button>`;
                 currentStep = 'ready';
                 isRequesting = false;
                 startAmbientSensor();
@@ -131,283 +135,274 @@
         } else { luxDisplay.textContent = '-- lx'; }
     }
 
-    // ── КАЛИБРОВКА ПО МОНЕТЕ ──
-    function startCalibration() {
-        currentStep = 'calibrating';
-        statusDiv.textContent = 'Совместите монету с круглой рамкой. Держите ровно.';
-        statusDiv.className = 'status-bar';
-        actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Захватить вручную</button>`;
-        stableCount = 0;
-        detectCoinLoop();
-    }
-
-    function detectCoinLoop() {
-        if (currentStep !== 'calibrating') return;
+    // ── СТОП-КАДР ──
+    function freezeFrame() {
+        // Рисуем текущий кадр и сохраняем его
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // Круглая рамка-прицел по центру
-        const radius = canvas.width * 0.22; // диаметр ~44% экрана
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-
-        // Анализ яркости: внутри круга vs снаружи
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let innerSum = 0, innerCount = 0;
-        let outerSum = 0, outerCount = 0;
-
-        for (let y = 0; y < canvas.height; y += 3) {
-            for (let x = 0; x < canvas.width; x += 3) {
-                const dist = Math.hypot(x - cx, y - cy);
-                const idx = (y * canvas.width + x) * 4;
-                const bright = (imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2]) / 3;
-                
-                if (dist < radius * 0.85) {
-                    innerSum += bright;
-                    innerCount++;
-                } else if (dist > radius * 1.2 && dist < radius * 1.6) {
-                    outerSum += bright;
-                    outerCount++;
-                }
-            }
-        }
-
-        const innerBright = innerSum / Math.max(innerCount, 1);
-        const outerBright = outerSum / Math.max(outerCount, 1);
-        const coinDetected = innerBright > 120 && (innerBright - outerBright) > 35;
-
-        // Рисуем прицел
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         
-        if (coinDetected) {
-            stableCount++;
-            const color = stableCount >= STABLE_THRESHOLD ? '#00ff88' : '#ffdd57';
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 5;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 18;
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            
-            statusDiv.textContent = stableCount >= STABLE_THRESHOLD ? '✅ Захвачено! Не двигайте телефон.' : 'Держите ровно...';
-            statusDiv.className = 'status-bar ready';
-
-            if (stableCount >= STABLE_THRESHOLD) {
-                scale = (radius * 2) / COIN_DIAMETER_MM;
-                onCalibrated();
-                return;
-            }
-        } else {
-            stableCount = 0;
-            
-            // Затемнение вне круга
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(0, 0, canvas.width, canvas.height);
-            ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
-            ctx.fillStyle = 'rgba(0,0,0,0.45)';
-            ctx.fill();
-            ctx.restore();
-            
-            // Рамка
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([10, 5]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Перекрестие
-            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(cx - radius - 15, cy); ctx.lineTo(cx + radius + 15, cy);
-            ctx.moveTo(cx, cy - radius - 15); ctx.lineTo(cx, cy + radius + 15);
-            ctx.stroke();
-            
-            // Текст
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 18px system-ui';
-            ctx.textAlign = 'center';
-            ctx.fillText('Поместите монету в круг', cx, cy - radius - 20);
-            
-            statusDiv.textContent = 'Совместите монету 5₽ с круглой рамкой.';
-            statusDiv.className = 'status-bar';
-        }
-
-        calibrationFrameId = requestAnimationFrame(detectCoinLoop);
-    }
-
-    function captureCalibration() {
-        const radius = canvas.width * 0.22;
-        scale = (radius * 2) / COIN_DIAMETER_MM;
-        onCalibrated();
-    }
-
-    function onCalibrated() {
-        if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+        // Создаём рамку монеты (круг по центру) и рамку объекта
+        const coinR = canvas.width * 0.08;
+        coinFrame = {
+            cx: canvas.width / 2,
+            cy: canvas.height / 2,
+            r: coinR
+        };
+        
         const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
-        frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
-
+        frame = {
+            x: (canvas.width - fw) / 2,
+            y: (canvas.height - fh) / 2,
+            w: fw,
+            h: fh
+        };
+        
         currentStep = 'framing';
-        statusDiv.textContent = '📐 Растяните рамку по границам объекта.';
+        statusDiv.textContent = '🔴 Обведите монету. ⬜ Растяните рамку по объекту.';
         statusDiv.className = 'status-bar ready';
         actionArea.innerHTML = `
-            <button class="btn secondary" onclick="resetFrame()">↺ Сброс</button>
-            <button class="btn" id="actionBtn" onclick="handleAction()">✓ Завершить</button>
+            <button class="btn secondary" onclick="resetFrames()">↺ Сброс</button>
+            <button class="btn" id="actionBtn" onclick="handleAction()">✓ Измерить</button>
         `;
-
-        drawFrame();
+        
+        drawFrozenScene();
         canvas.addEventListener('touchstart', onTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onTouchMove, { passive: false });
         canvas.addEventListener('touchend', onTouchEnd);
     }
 
-    // ── ИЗМЕРИТЕЛЬНАЯ РАМКА ──
-    function drawFrame() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (!frame) return;
-        const { x, y, w, h } = frame;
-
-        // Затемнение
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.clearRect(x, y, w, h);
-
-        // Белая рамка
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(x, y, w, h);
-
-        // Угловые маркеры
-        const hs = HANDLE_SIZE;
-        [[x, y], [x+w, y], [x, y+h], [x+w, y+h]].forEach(([cx, cy]) => {
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(cx, cy, hs/2, 0, Math.PI*2);
-            ctx.fill();
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        });
-
-        // Размеры — крупный шрифт с тенью
-        if (scale) {
-            const wCm = (w / scale / 10).toFixed(1);
-            const hCm = (h / scale / 10).toFixed(1);
-            const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(2);
-
-            ctx.fillStyle = '#000000';
-            ctx.font = 'bold 22px system-ui';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'rgba(255,255,255,0.9)';
-            ctx.shadowBlur = 6;
-
-            // Ширина сверху
-            ctx.fillText(`${wCm} см`, x + w/2, y - 14);
-            // Высота слева
+    function drawFrozenScene() {
+        if (!frozenImageData) return;
+        ctx.putImageData(frozenImageData, 0, 0);
+        
+        if (coinFrame) {
+            // Затемнение вне круга монеты
             ctx.save();
-            ctx.translate(x - 22, y + h/2);
-            ctx.rotate(-Math.PI/2);
-            ctx.fillText(`${hCm} см`, 0, 0);
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+            ctx.arc(coinFrame.cx, coinFrame.cy, coinFrame.r, 0, Math.PI * 2, true);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fill();
             ctx.restore();
             
+            // Окружность монеты
+            ctx.beginPath();
+            ctx.arc(coinFrame.cx, coinFrame.cy, coinFrame.r, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            
+            // Маркер диаметра
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath();
+            ctx.arc(coinFrame.cx + coinFrame.r, coinFrame.cy, 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Подпись
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 16px system-ui';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 4;
+            ctx.fillText('Монета 5₽', coinFrame.cx, coinFrame.cy - coinFrame.r - 12);
             ctx.shadowBlur = 0;
-
-            // Площадь в центре
-            const areaText = `${areaM2} м²`;
-            const tw = ctx.measureText(areaText).width + 24;
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
-            ctx.fillRect(x + w/2 - tw/2, y + h/2 - 16, tw, 32);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 20px system-ui';
-            ctx.fillText(areaText, x + w/2, y + h/2 + 8);
+        }
+        
+        if (frame) {
+            const { x, y, w, h } = frame;
+            
+            // Затемнение
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(0, 0, canvas.width, y);
+            ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
+            ctx.fillRect(0, y, x, h);
+            ctx.fillRect(x + w, y, canvas.width - x - w, h);
+            
+            // Рамка
+            ctx.strokeStyle = '#2a6df4';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, w, h);
+            
+            // Угловые маркеры
+            const hs = HANDLE_SIZE;
+            [[x, y], [x+w, y], [x, y+h], [x+w, y+h]].forEach(([cx, cy]) => {
+                ctx.fillStyle = '#2a6df4';
+                ctx.beginPath();
+                ctx.arc(cx, cy, hs/2, 0, Math.PI*2);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            });
+            
+            // Размеры — если калибровка монеты уже есть
+            if (coinDiameterPx && coinDiameterPx > 0) {
+                const scale = coinDiameterPx / COIN_DIAMETER_MM;
+                const wCm = (w / scale / 10).toFixed(1);
+                const hCm = (h / scale / 10).toFixed(1);
+                const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(3);
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 26px system-ui';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                ctx.shadowBlur = 8;
+                ctx.fillText(`${wCm} см`, x + w/2, y - 16);
+                ctx.save();
+                ctx.translate(x - 28, y + h/2);
+                ctx.rotate(-Math.PI/2);
+                ctx.fillText(`${hCm} см`, 0, 0);
+                ctx.restore();
+                
+                const areaText = `${areaM2} м²`;
+                const tw = ctx.measureText(areaText).width + 24;
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                ctx.fillRect(x + w/2 - tw/2, y + h/2 - 16, tw, 32);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 22px system-ui';
+                ctx.fillText(areaText, x + w/2, y + h/2 + 8);
+                ctx.shadowBlur = 0;
+            } else {
+                // Монета ещё не откалибрована
+                ctx.fillStyle = '#ff4444';
+                ctx.font = 'bold 18px system-ui';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = '#000';
+                ctx.shadowBlur = 6;
+                ctx.fillText('Обведите монету!', x + w/2, y + h/2 + 6);
+                ctx.shadowBlur = 0;
+            }
         }
     }
 
-    function getHandle(px, py) {
-        if (!frame) return null;
-        const hs = HANDLE_SIZE;
-        const handles = [
-            { cx: frame.x, cy: frame.y, id: 'tl' },
-            { cx: frame.x + frame.w, cy: frame.y, id: 'tr' },
-            { cx: frame.x, cy: frame.y + frame.h, id: 'bl' },
-            { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'br' }
-        ];
-        for (let h of handles) {
-            if (Math.hypot(px - h.cx, py - h.cy) < hs * 1.3) return h.id;
+    function getInteraction(px, py) {
+        // Возвращает, с чем взаимодействует палец: 'coin', 'frame_tl', 'frame_tr', 'frame_bl', 'frame_br', 'frame_move', null
+        // Приоритет — рамка объекта (она сверху логически)
+        
+        if (frame) {
+            const hs = HANDLE_SIZE;
+            const handles = [
+                { cx: frame.x, cy: frame.y, id: 'frame_tl' },
+                { cx: frame.x + frame.w, cy: frame.y, id: 'frame_tr' },
+                { cx: frame.x, cy: frame.y + frame.h, id: 'frame_bl' },
+                { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'frame_br' }
+            ];
+            for (let h of handles) {
+                if (Math.hypot(px - h.cx, py - h.cy) < hs * 1.3) return h.id;
+            }
+            if (px > frame.x && px < frame.x + frame.w && py > frame.y && py < frame.y + frame.h) return 'frame_move';
         }
-        if (px > frame.x && px < frame.x + frame.w && py > frame.y && py < frame.y + frame.h) return 'move';
+        
+        if (coinFrame && Math.hypot(px - coinFrame.cx - coinFrame.r, py - coinFrame.cy) < 28) {
+            return 'coin';
+        }
+        
         return null;
     }
 
     function onTouchStart(e) {
-        if (!frame || currentStep !== 'framing') return;
+        if (currentStep !== 'framing') return;
         e.preventDefault(); e.stopPropagation();
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
         const sx = (touch.clientX - rect.left) * (canvas.width / rect.width);
         const sy = (touch.clientY - rect.top) * (canvas.height / rect.height);
-        dragging = getHandle(sx, sy);
-        if (dragging) {
+        
+        const target = getInteraction(sx, sy);
+        
+        if (target === 'coin') {
+            draggingCoin = true;
+            coinDragStart = { x: sx, y: sy };
+            coinFrameStart = { ...coinFrame };
+        } else if (target && target.startsWith('frame_')) {
+            dragging = target;
             dragStart = { x: sx, y: sy };
             frameStart = { ...frame };
         }
     }
 
     function onTouchMove(e) {
-        if (!dragging || !frame) return;
+        if (!dragging && !draggingCoin) return;
         e.preventDefault(); e.stopPropagation();
+        
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
         const cx = (touch.clientX - rect.left) * (canvas.width / rect.width);
         const cy = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        
+        if (draggingCoin && coinFrame) {
+            const dx = cx - coinDragStart.x;
+            const newR = Math.max(20, Math.min(canvas.width * 0.3, coinFrameStart.r + dx));
+            coinFrame.r = newR;
+            coinDiameterPx = newR * 2;
+            drawFrozenScene();
+            return;
+        }
+        
+        if (!dragging || !frame) return;
+        
         const dx = cx - dragStart.x, dy = cy - dragStart.y;
-        const MIN = 50;
-
-        if (dragging === 'move') {
+        const MIN = 40;
+        
+        if (dragging === 'frame_move') {
             frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
             frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
-        } else if (dragging === 'tl') {
+        } else if (dragging === 'frame_tl') {
             const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
             const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
             frame.w = frameStart.x + frameStart.w - nx; frame.h = frameStart.y + frameStart.h - ny;
             frame.x = nx; frame.y = ny;
-        } else if (dragging === 'tr') {
+        } else if (dragging === 'frame_tr') {
             frame.w = Math.max(MIN, frameStart.w + dx);
             const ny = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN, frameStart.y + dy));
             frame.h = frameStart.y + frameStart.h - ny; frame.y = ny;
-        } else if (dragging === 'bl') {
+        } else if (dragging === 'frame_bl') {
             const nx = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN, frameStart.x + dx));
             frame.w = frameStart.x + frameStart.w - nx; frame.x = nx;
             frame.h = Math.max(MIN, frameStart.h + dy);
-        } else if (dragging === 'br') {
+        } else if (dragging === 'frame_br') {
             frame.w = Math.max(MIN, frameStart.w + dx);
             frame.h = Math.max(MIN, frameStart.h + dy);
         }
-        drawFrame();
+        drawFrozenScene();
     }
 
-    function onTouchEnd(e) { dragging = null; }
+    function onTouchEnd(e) {
+        dragging = null;
+        draggingCoin = false;
+    }
 
-    function resetFrame() {
+    function resetFrames() {
+        const coinR = canvas.width * 0.08;
+        coinFrame = { cx: canvas.width / 2, cy: canvas.height / 2, r: coinR };
+        coinDiameterPx = null;
         const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
         frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
-        drawFrame();
+        drawFrozenScene();
     }
 
-    function finishFraming() {
+    // ── ФИНАЛЬНЫЙ РАСЧЁТ ──
+    function finishMeasurement() {
+        if (!coinDiameterPx || coinDiameterPx <= 0) {
+            statusDiv.textContent = '⚠️ Сначала обведите монету! Потяните за красный маркер.';
+            statusDiv.className = 'status-bar error';
+            return;
+        }
+        
         canvas.removeEventListener('touchstart', onTouchStart);
         canvas.removeEventListener('touchmove', onTouchMove);
         canvas.removeEventListener('touchend', onTouchEnd);
         
+        const scale = coinDiameterPx / COIN_DIAMETER_MM; // px/mm
         const widthM = (frame.w / scale / 1000);
         const heightM = (frame.h / scale / 1000);
         const area = widthM * heightM;
         
-        document.getElementById('resWidth').textContent = widthM.toFixed(2) + ' м (' + (widthM*100).toFixed(0) + ' см)';
-        document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м (' + (heightM*100).toFixed(0) + ' см)';
+        document.getElementById('resWidth').textContent = widthM.toFixed(2) + ' м (' + (widthM*100).toFixed(1) + ' см)';
+        document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м (' + (heightM*100).toFixed(1) + ' см)';
         document.getElementById('resArea').textContent = area.toFixed(3) + ' м²';
         document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
         document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
@@ -417,30 +412,35 @@
         
         resultsDiv.classList.add('visible');
         currentStep = 'done';
-        statusDiv.textContent = 'Измерение выполнено!';
+        statusDiv.textContent = '✅ Измерение выполнено!';
         statusDiv.className = 'status-bar';
-        actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Измерить заново</button>`;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Новое измерение</button>`;
+        drawFrozenScene();
     }
 
     function resetAll() {
-        if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
         canvas.removeEventListener('touchstart', onTouchStart);
         canvas.removeEventListener('touchmove', onTouchMove);
         canvas.removeEventListener('touchend', onTouchEnd);
-        scale = null; frame = null; dragging = null;
-        currentStep = 'ready';
-        statusDiv.textContent = 'Наведите камеру на монету 5₽ для калибровки.';
-        statusDiv.className = 'status-bar ready';
-        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Калибровать</button>`;
+        frozenImageData = null;
+        coinDiameterPx = null;
+        coinFrame = null;
+        frame = null;
+        dragging = null;
+        draggingCoin = false;
         resultsDiv.classList.remove('visible');
+        currentStep = 'ready';
+        statusDiv.textContent = 'Разместите монету на объекте. Нажмите «Снять».';
+        statusDiv.className = 'status-bar ready';
+        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять кадр</button>`;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Перезапускаем видео, если остановлен
+        if (video.paused) video.play();
     }
 
     window.addEventListener('beforeunload', () => {
         if (stream) stream.getTracks().forEach(t => t.stop());
         if (ambientSensor) ambientSensor.stop();
-        if (calibrationFrameId) cancelAnimationFrame(calibrationFrameId);
     });
     document.addEventListener('dblclick', () => {
         if (document.fullscreenElement) document.exitFullscreen();
