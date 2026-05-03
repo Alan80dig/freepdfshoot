@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Замер стены — Калибровка и измерение</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .header {
+            text-align: center;
+            padding: 12px 16px 8px;
+            flex-shrink: 0;
+        }
+        .header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: #ffffff;
+        }
+        .header .sub {
+            font-size: 0.75rem;
+            color: #999;
+            margin-top: 2px;
+        }
+
+        .viewfinder {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            margin: 0 16px;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
+        }
+        .viewfinder video,
+        .viewfinder canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .viewfinder canvas {
+            z-index: 2;
+        }
+
+        .status-bar {
+            text-align: center;
+            padding: 12px 16px 8px;
+            flex-shrink: 0;
+            font-size: 0.9rem;
+            color: #ccc;
+            min-height: 40px;
+            transition: color 0.3s;
+        }
+        .status-bar.ready {
+            color: #4caf50;
+            font-weight: 500;
+        }
+        .status-bar.error {
+            color: #ff6b6b;
+            font-weight: 500;
+        }
+
+        .action-area {
+            flex-shrink: 0;
+            padding: 0 16px 16px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s, opacity 0.2s;
+            background: #2a6df4;
+            color: #fff;
+            letter-spacing: 0.03em;
+        }
+        .btn:active {
+            opacity: 0.85;
+        }
+        .btn:disabled {
+            background: #3a3a3a;
+            color: #777;
+            cursor: not-allowed;
+        }
+        .btn.secondary {
+            background: #333;
+            color: #ccc;
+        }
+
+        .results {
+            flex-shrink: 0;
+            padding: 12px 16px;
+            display: none;
+            background: #222;
+            border-top: 1px solid #333;
+        }
+        .results.visible {
+            display: block;
+        }
+        .results .row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            padding: 4px 0;
+        }
+        .results .row span:last-child {
+            font-weight: 600;
+            color: #fff;
+        }
+        .results .tip {
+            margin-top: 8px;
+            font-size: 0.8rem;
+            color: #aaa;
+            background: #2a2a2a;
+            padding: 10px;
+            border-radius: 8px;
+            line-height: 1.4;
+        }
+
+        .lux-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.65);
+            color: #ffd966;
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 20px;
+            z-index: 3;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Замер стены</h1>
+        <div class="sub">Бесплатно • Без регистрации • Работает в браузере</div>
+    </div>
+
+    <div class="viewfinder" id="viewfinder">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="lux-indicator" id="luxDisplay">-- lx</div>
+    </div>
+
+    <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
+
+    <div class="action-area">
+        <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
+    </div>
+
+    <div class="results" id="results">
+        <div class="row"><span>Длина стены:</span><span id="resLength">—</span></div>
+        <div class="row"><span>Высота стены:</span><span id="resHeight">—</span></div>
+        <div class="row"><span>Площадь:</span><span id="resArea">—</span></div>
+        <div class="row"><span>Освещённость:</span><span id="resLux">—</span></div>
+        <div class="row"><span>Ближайший RAL:</span><span id="resRAL">—</span></div>
+        <div class="tip" id="resTip"></div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════
+        // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+        // ═══════════════════════════════════════
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const actionBtn = document.getElementById('actionBtn');
+        const resultsDiv = document.getElementById('results');
+        const luxDisplay = document.getElementById('luxDisplay');
+
+        let stream = null;
+        let currentStep = 'idle';   // idle → ready → calibrating → calibrated → measuring → done
+        let scale = null;           // px/mm
+        let currentLux = null;
+        let ambientSensor = null;
+        let isRequesting = false;   // флаг защиты от двойного клика
+
+        // ═══════════════════════════════════════
+        // ОСНОВНАЯ ЛОГИКА ШАГОВ
+        // ═══════════════════════════════════════
+        function handleAction() {
+            // Защита от повторного нажатия
+            if (isRequesting) return;
+            
+            switch (currentStep) {
+                case 'idle':
+                    startCamera();
+                    break;
+                case 'ready':
+                    startCalibration();
+                    break;
+                case 'calibrating':
+                    captureCalibration();
+                    break;
+                case 'calibrated':
+                    startMeasurement();
+                    break;
+                case 'measuring':
+                    captureMeasurement();
+                    break;
+                case 'done':
+                    resetAll();
+                    break;
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // ИНИЦИАЛИЗАЦИЯ КАМЕРЫ (С ЯВНЫМ ЗАПРОСОМ РАЗРЕШЕНИЯ)
+        // ═══════════════════════════════════════
+        async function startCamera() {
+            isRequesting = true;
+            actionBtn.disabled = true;
+            actionBtn.textContent = 'Запрашиваю разрешение...';
+            statusDiv.textContent = 'Ищу камеру...';
+            statusDiv.className = 'status-bar';
+
+            // ── Шаг 1: Явный запрос разрешения через Permissions API ──
+            let permissionSkipped = true;
+            
+            if (navigator.permissions && navigator.permissions.query) {
+                try {
+                    const permissionStatus = await navigator.permissions.query({ name: 'camera' });
+                    console.log('Состояние разрешения:', permissionStatus.state);
+                    
+                    if (permissionStatus.state === 'denied') {
+                        showPermissionError('denied');
+                        isRequesting = false;
+                        return;
+                    }
+                    
+                    if (permissionStatus.state === 'prompt') {
+                        permissionSkipped = false;
+                        statusDiv.textContent = '⏳ Нажмите "Разрешить" в диалоге браузера...';
+                        statusDiv.className = 'status-bar';
+                        
+                        const permissionGranted = await new Promise((resolve) => {
+                            const timeout = setTimeout(() => {
+                                permissionStatus.onchange = null;
+                                resolve('timeout');
+                            }, 20000);
+                            
+                            permissionStatus.onchange = () => {
+                                clearTimeout(timeout);
+                                permissionStatus.onchange = null;
+                                resolve(permissionStatus.state);
+                            };
+                        });
+                        
+                        console.log('Результат разрешения:', permissionGranted);
+                        
+                        if (permissionGranted === 'denied') {
+                            showPermissionError('denied');
+                            isRequesting = false;
+                            return;
+                        }
+                        
+                        if (permissionGranted === 'timeout') {
+                            console.warn('Таймаут разрешения, пробую getUserMedia напрямую');
+                        }
+                    }
+                } catch (permErr) {
+                    console.warn('Permissions API не сработал:', permErr.message);
+                }
+            }
+
+            // ── Шаг 2: getUserMedia с перебором конфигураций ──
+            statusDiv.textContent = 'Запускаю камеру...';
+            
+            const configs = [
+                {
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                },
+                {
+                    video: {
+                        facingMode: 'environment'
+                    }
+                },
+                {
+                    video: {
+                        facingMode: { ideal: 'environment' }
+                    }
+                },
+                {
+                    video: true
+                },
+                {
+                    video: {
+                        width: { min: 640 },
+                        height: { min: 480 }
+                    }
+                }
+            ];
+
+            let lastError = null;
+
+            for (let i = 0; i < configs.length; i++) {
+                try {
+                    console.log('Пробую конфигурацию', i + 1, JSON.stringify(configs[i]));
+                    stream = await navigator.mediaDevices.getUserMedia(configs[i]);
+                    
+                    video.srcObject = stream;
+                    await video.play();
+                    
+                    const rect = video.getBoundingClientRect();
+                    canvas.width = video.videoWidth || rect.width;
+                    canvas.height = video.videoHeight || rect.height;
+                    
+                    statusDiv.textContent = 'Камера работает. Приступим к калибровке.';
+                    statusDiv.className = 'status-bar ready';
+                    actionBtn.textContent = 'Откалибровать по карте';
+                    actionBtn.disabled = false;
+                    currentStep = 'ready';
+                    isRequesting = false;
+                    
+                    startAmbientSensor();
+                    return;
+                    
+                } catch (err) {
+                    console.error('Конфигурация ' + (i+1) + ' провалилась:', err.name, err.message);
+                    lastError = err;
+                    
+                    // Если ошибка не в разрешении — нет смысла перебирать дальше
+                    if (err.name === 'NotAllowedError') {
+                        break;
+                    }
+                }
+            }
+
+            showPermissionError(lastError ? lastError.name : 'unknown');
+            isRequesting = false;
+        }
+
+        function showPermissionError(errorName) {
+            let errorMsg = '';
+            
+            switch (errorName) {
+                case 'denied':
+                case 'NotAllowedError':
+                    errorMsg = '⛔ Доступ к камере запрещён.';
+                    break;
+                case 'NotFoundError':
+                    errorMsg = '📷 Камера не найдена на устройстве.';
+                    break;
+                case 'NotReadableError':
+                    errorMsg = '🔒 Камера занята другим приложением. Закройте его.';
+                    break;
+                default:
+                    errorMsg = '⚠️ Не удалось открыть камеру.';
+            }
+            
+            statusDiv.textContent = errorMsg + ' Проверьте разрешения в настройках.';
+            statusDiv.className = 'status-bar error';
+            actionBtn.textContent = 'Попробовать снова';
+            actionBtn.disabled = false;
+            currentStep = 'idle';
+        }
+
+        // ═══════════════════════════════════════
+        // ДАТЧИК ОСВЕЩЁННОСТИ
+        // ═══════════════════════════════════════
+        function startAmbientSensor() {
+            if ('AmbientLightSensor' in window) {
+                try {
+                    ambientSensor = new AmbientLightSensor();
+                    ambientSensor.onreading = () => {
+                        currentLux = Math.round(ambientSensor.illuminance);
+                        luxDisplay.textContent = currentLux + ' lx';
+                    };
+                    ambientSensor.onerror = () => {
+                        luxDisplay.textContent = '-- lx';
+                        ambientSensor = null;
+                    };
+                    ambientSensor.start();
+                } catch (e) {
+                    luxDisplay.textContent = '-- lx';
+                    ambientSensor = null;
+                }
+            } else {
+                luxDisplay.textContent = '-- lx';
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // ЗАГЛУШКИ ШАГОВ
+        // ═══════════════════════════════════════
+        
+        function startCalibration() {
+            currentStep = 'calibrating';
+            statusDiv.textContent = 'Приложите банковскую карту к стене и совместите с рамкой.';
+            statusDiv.className = 'status-bar';
+            actionBtn.textContent = 'Захватить калибровку';
+        }
+
+        function captureCalibration() {
+            scale = canvas.width / 86; // временно
+            currentStep = 'calibrated';
+            statusDiv.textContent = 'Калибровка выполнена. Наведите камеру на стену.';
+            statusDiv.className = 'status-bar ready';
+            actionBtn.textContent = 'Измерить стену';
+        }
+
+        function startMeasurement() {
+            currentStep = 'measuring';
+            statusDiv.textContent = 'Наведите камеру так, чтобы стена была видна целиком.';
+            statusDiv.className = 'status-bar';
+            actionBtn.textContent = 'Захватить замер';
+        }
+
+        function captureMeasurement() {
+            const length = 3.4;
+            const height = 2.6;
+            const area = length * height;
+            
+            document.getElementById('resLength').textContent = length.toFixed(1) + ' м';
+            document.getElementById('resHeight').textContent = height.toFixed(1) + ' м';
+            document.getElementById('resArea').textContent = area.toFixed(1) + ' м²';
+            document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
+            document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
+            document.getElementById('resTip').textContent = 
+                area > 12 
+                    ? '👍 Просторная стена. Поместится диван 3 м и шкаф 1.8 м.'
+                    : '⚠️ Компактная стена. Рекомендуем мебель не длиннее 2 м.';
+            
+            resultsDiv.classList.add('visible');
+            currentStep = 'done';
+            statusDiv.textContent = 'Замер выполнен!';
+            statusDiv.className = 'status-bar';
+            actionBtn.textContent = 'Замерить заново';
+            actionBtn.className = 'btn secondary';
+        }
+
+        function resetAll() {
+            scale = null;
+            currentStep = 'ready';
+            statusDiv.textContent = 'Камера работает. Приступим к калибровке.';
+            statusDiv.className = 'status-bar ready';
+            actionBtn.textContent = 'Откалибровать по карте';
+            actionBtn.className = 'btn';
+            resultsDiv.classList.remove('visible');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // ═══════════════════════════════════════
+        // ОЧИСТКА ПРИ УХОДЕ
+        // ═══════════════════════════════════════
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (ambientSensor) {
+                ambientSensor.stop();
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (video.videoWidth) {
+                const rect = video.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+            }
+        });
+    </script>
+</body>
+</html>
