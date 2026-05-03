@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Замер стены — Калибровка и измерение</title>
+    <title>Глаз прораба</title>
     <style>
         * {
             margin: 0;
@@ -42,6 +42,7 @@
             margin-top: 2px;
         }
 
+        /* ── Видоискатель ──────────── */
         .viewfinder {
             position: relative;
             flex: 1;
@@ -65,6 +66,40 @@
             z-index: 2;
         }
 
+        /* ── Индикатор люксов ─────── */
+        .lux-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.65);
+            color: #ffd966;
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 20px;
+            z-index: 3;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+
+        /* ── Подсказка калибровки ──── */
+        .calibration-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 0.8rem;
+            padding: 8px 20px;
+            border-radius: 20px;
+            z-index: 4;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+            transition: opacity 0.3s;
+            text-align: center;
+        }
+
+        /* ── Статус-бар ───────────── */
         .status-bar {
             text-align: center;
             padding: 12px 16px 8px;
@@ -83,6 +118,7 @@
             font-weight: 500;
         }
 
+        /* ── Кнопка ───────────────── */
         .action-area {
             flex-shrink: 0;
             padding: 0 16px 16px;
@@ -114,6 +150,7 @@
             color: #ccc;
         }
 
+        /* ── Панель результатов ───── */
         .results {
             flex-shrink: 0;
             padding: 12px 16px;
@@ -143,33 +180,22 @@
             border-radius: 8px;
             line-height: 1.4;
         }
-
-        .lux-indicator {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            background: rgba(0,0,0,0.65);
-            color: #ffd966;
-            font-size: 0.7rem;
-            padding: 4px 10px;
-            border-radius: 20px;
-            z-index: 3;
-            pointer-events: none;
-            backdrop-filter: blur(4px);
-        }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>Замер стены</h1>
-        <div class="sub">Бесплатно • Без регистрации • Работает в браузере</div>
+        <h1>Глаз прораба</h1>
+        <div class="sub">Бесплатно • Без регистрации • Всегда в кармане</div>
     </div>
 
     <div class="viewfinder" id="viewfinder">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
         <div class="lux-indicator" id="luxDisplay">-- lx</div>
+        <div class="calibration-hint" id="calibrationHint" style="display:none;">
+            📏 Приложите карту к стене и совместите с рамкой
+        </div>
     </div>
 
     <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
@@ -198,21 +224,32 @@
         const actionBtn = document.getElementById('actionBtn');
         const resultsDiv = document.getElementById('results');
         const luxDisplay = document.getElementById('luxDisplay');
+        const calibrationHint = document.getElementById('calibrationHint');
 
         let stream = null;
         let currentStep = 'idle';   // idle → ready → calibrating → calibrated → measuring → done
         let scale = null;           // px/mm
         let currentLux = null;
         let ambientSensor = null;
-        let isRequesting = false;   // флаг защиты от двойного клика
+        let isRequesting = false;
+
+        // Параметры банковской карты (ISO/IEC 7810 ID-1)
+        const CARD_WIDTH_MM = 86;
+        const CARD_HEIGHT_MM = 54;
+        const CARD_ASPECT = CARD_WIDTH_MM / CARD_HEIGHT_MM; // ≈ 1.593
+
+        // Для авто-калибровки
+        let calibrationFrameId = null;
+        let cardDetected = false;
+        let stableCount = 0;
+        const STABLE_THRESHOLD = 15; // кадров подряд с картой для авто-захвата
 
         // ═══════════════════════════════════════
         // ОСНОВНАЯ ЛОГИКА ШАГОВ
         // ═══════════════════════════════════════
         function handleAction() {
-            // Защита от повторного нажатия
             if (isRequesting) return;
-            
+
             switch (currentStep) {
                 case 'idle':
                     startCamera();
@@ -221,6 +258,7 @@
                     startCalibration();
                     break;
                 case 'calibrating':
+                    // Ручной захват (если авто не сработал)
                     captureCalibration();
                     break;
                 case 'calibrated':
@@ -236,7 +274,7 @@
         }
 
         // ═══════════════════════════════════════
-        // ИНИЦИАЛИЗАЦИЯ КАМЕРЫ (С ЯВНЫМ ЗАПРОСОМ РАЗРЕШЕНИЯ)
+        // ИНИЦИАЛИЗАЦИЯ КАМЕРЫ
         // ═══════════════════════════════════════
         async function startCamera() {
             isRequesting = true;
@@ -245,48 +283,41 @@
             statusDiv.textContent = 'Ищу камеру...';
             statusDiv.className = 'status-bar';
 
-            // ── Шаг 1: Явный запрос разрешения через Permissions API ──
             let permissionSkipped = true;
-            
+
             if (navigator.permissions && navigator.permissions.query) {
                 try {
                     const permissionStatus = await navigator.permissions.query({ name: 'camera' });
                     console.log('Состояние разрешения:', permissionStatus.state);
-                    
+
                     if (permissionStatus.state === 'denied') {
                         showPermissionError('denied');
                         isRequesting = false;
                         return;
                     }
-                    
+
                     if (permissionStatus.state === 'prompt') {
                         permissionSkipped = false;
                         statusDiv.textContent = '⏳ Нажмите "Разрешить" в диалоге браузера...';
                         statusDiv.className = 'status-bar';
-                        
+
                         const permissionGranted = await new Promise((resolve) => {
                             const timeout = setTimeout(() => {
                                 permissionStatus.onchange = null;
                                 resolve('timeout');
                             }, 20000);
-                            
+
                             permissionStatus.onchange = () => {
                                 clearTimeout(timeout);
                                 permissionStatus.onchange = null;
                                 resolve(permissionStatus.state);
                             };
                         });
-                        
-                        console.log('Результат разрешения:', permissionGranted);
-                        
+
                         if (permissionGranted === 'denied') {
                             showPermissionError('denied');
                             isRequesting = false;
                             return;
-                        }
-                        
-                        if (permissionGranted === 'timeout') {
-                            console.warn('Таймаут разрешения, пробую getUserMedia напрямую');
                         }
                     }
                 } catch (permErr) {
@@ -294,9 +325,8 @@
                 }
             }
 
-            // ── Шаг 2: getUserMedia с перебором конфигураций ──
             statusDiv.textContent = 'Запускаю камеру...';
-            
+
             const configs = [
                 {
                     video: {
@@ -332,29 +362,28 @@
                 try {
                     console.log('Пробую конфигурацию', i + 1, JSON.stringify(configs[i]));
                     stream = await navigator.mediaDevices.getUserMedia(configs[i]);
-                    
+
                     video.srcObject = stream;
                     await video.play();
-                    
+
                     const rect = video.getBoundingClientRect();
                     canvas.width = video.videoWidth || rect.width;
                     canvas.height = video.videoHeight || rect.height;
-                    
+
                     statusDiv.textContent = 'Камера работает. Приступим к калибровке.';
                     statusDiv.className = 'status-bar ready';
                     actionBtn.textContent = 'Откалибровать по карте';
                     actionBtn.disabled = false;
                     currentStep = 'ready';
                     isRequesting = false;
-                    
+
                     startAmbientSensor();
                     return;
-                    
+
                 } catch (err) {
-                    console.error('Конфигурация ' + (i+1) + ' провалилась:', err.name, err.message);
+                    console.error('Конфигурация ' + (i + 1) + ' провалилась:', err.name, err.message);
                     lastError = err;
-                    
-                    // Если ошибка не в разрешении — нет смысла перебирать дальше
+
                     if (err.name === 'NotAllowedError') {
                         break;
                     }
@@ -367,7 +396,7 @@
 
         function showPermissionError(errorName) {
             let errorMsg = '';
-            
+
             switch (errorName) {
                 case 'denied':
                 case 'NotAllowedError':
@@ -382,7 +411,7 @@
                 default:
                     errorMsg = '⚠️ Не удалось открыть камеру.';
             }
-            
+
             statusDiv.textContent = errorMsg + ' Проверьте разрешения в настройках.';
             statusDiv.className = 'status-bar error';
             actionBtn.textContent = 'Попробовать снова';
@@ -416,24 +445,252 @@
         }
 
         // ═══════════════════════════════════════
-        // ЗАГЛУШКИ ШАГОВ
+        // КАЛИБРОВКА ПО КАРТЕ (АВТО-ДЕТЕКТ)
         // ═══════════════════════════════════════
-        
         function startCalibration() {
             currentStep = 'calibrating';
-            statusDiv.textContent = 'Приложите банковскую карту к стене и совместите с рамкой.';
+            statusDiv.textContent = 'Ищем банковскую карту... Наведите камеру.';
             statusDiv.className = 'status-bar';
-            actionBtn.textContent = 'Захватить калибровку';
+            actionBtn.textContent = 'Захватить вручную';
+            calibrationHint.style.display = 'block';
+            cardDetected = false;
+            stableCount = 0;
+
+            // Запускаем цикл анализа кадров
+            detectCardLoop();
+        }
+
+        function detectCardLoop() {
+            if (currentStep !== 'calibrating') {
+                calibrationHint.style.display = 'none';
+                return;
+            }
+
+            // Рисуем кадр на canvas и анализируем
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            // Ищем карту
+            const cardRect = findCard(imageData, canvas.width, canvas.height);
+
+            // Рисуем виртуальную рамку (всегда видна как подсказка)
+            drawGuideFrame();
+
+            if (cardRect) {
+                // Карта найдена — рисуем зелёную рамку
+                drawDetectedCard(cardRect);
+                stableCount++;
+                calibrationHint.textContent = '✅ Карта найдена! Держите ровно...';
+                calibrationHint.style.background = 'rgba(46,125,50,0.8)';
+
+                if (stableCount >= STABLE_THRESHOLD) {
+                    // Авто-захват
+                    const cardWidthPx = cardRect.width;
+                    scale = cardWidthPx / CARD_WIDTH_MM; // px/mm
+                    console.log('Авто-калибровка! Масштаб:', scale.toFixed(3), 'px/mm');
+                    onCalibrated();
+                    return;
+                }
+            } else {
+                // Карта не найдена — красная рамка
+                stableCount = 0;
+                calibrationHint.textContent = '📏 Приложите карту к стене и совместите с рамкой';
+                calibrationHint.style.background = 'rgba(0,0,0,0.75)';
+                drawNoCardWarning();
+            }
+
+            calibrationFrameId = requestAnimationFrame(detectCardLoop);
+        }
+
+        function findCard(imageData, w, h) {
+            // Упрощённый детектор: ищем крупный связный контур с пропорциями ~1.59
+            // Работаем с уменьшенным изображением для скорости
+            const step = 4; // каждый 4-й пиксель
+            const brightnessThreshold = 80;
+            const minArea = (w * h) * 0.05; // минимум 5% экрана
+            const maxArea = (w * h) * 0.7;  // максимум 70% экрана
+
+            // Строим бинарную карту яркости (ищем "светлый" объект — карту)
+            const smallW = Math.floor(w / step);
+            const smallH = Math.floor(h / step);
+            const binary = new Uint8Array(smallW * smallH);
+
+            for (let sy = 0; sy < smallH; sy++) {
+                for (let sx = 0; sx < smallW; sx++) {
+                    const px = sx * step;
+                    const py = sy * step;
+                    const idx = (py * w + px) * 4;
+                    const r = imageData.data[idx];
+                    const g = imageData.data[idx + 1];
+                    const b = imageData.data[idx + 2];
+                    const brightness = (r + g + b) / 3;
+                    binary[sy * smallW + sx] = brightness > brightnessThreshold ? 1 : 0;
+                }
+            }
+
+            // Поиск связных областей (упрощённый flood fill по строкам)
+            const visited = new Uint8Array(smallW * smallH);
+            let bestRect = null;
+            let bestScore = 0;
+
+            for (let sy = 1; sy < smallH - 1; sy++) {
+                for (let sx = 1; sx < smallW - 1; sx++) {
+                    const idx = sy * smallW + sx;
+                    if (binary[idx] === 1 && visited[idx] === 0) {
+                        // Нашли белый пиксель — определяем границы связной области
+                        const bounds = floodFillBounds(binary, visited, smallW, smallH, sx, sy);
+                        if (!bounds) continue;
+
+                        const area = bounds.w * bounds.h;
+                        if (area < minArea || area > maxArea) continue;
+
+                        const aspect = bounds.w / bounds.h;
+                        const aspectScore = 1 - Math.min(Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT, 1);
+
+                        // Комбинированный скоринг: размер + пропорции
+                        const sizeScore = Math.min(area / (w * h * 0.15), 1);
+                        const score = aspectScore * 0.7 + sizeScore * 0.3;
+
+                        if (score > bestScore && aspectScore > 0.65) {
+                            bestScore = score;
+                            bestRect = {
+                                x: bounds.x * step,
+                                y: bounds.y * step,
+                                width: bounds.w * step,
+                                height: bounds.h * step
+                            };
+                        }
+                    }
+                }
+            }
+
+            return bestRect;
+        }
+
+        function floodFillBounds(binary, visited, w, h, startX, startY) {
+            // Ограниченный BFS для нахождения границ светлой области
+            const queue = [[startX, startY]];
+            visited[startY * w + startX] = 1;
+
+            let minX = startX, maxX = startX;
+            let minY = startY, maxY = startY;
+            let count = 0;
+            const maxPixels = w * h * 0.5; // ограничение
+            let head = 0;
+
+            while (head < queue.length && count < maxPixels) {
+                const [x, y] = queue[head++];
+                count++;
+
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+
+                // 8-связные соседи
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                            const nidx = ny * w + nx;
+                            if (binary[nidx] === 1 && visited[nidx] === 0) {
+                                visited[nidx] = 1;
+                                queue.push([nx, ny]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            const boundsW = maxX - minX + 1;
+            const boundsH = maxY - minY + 1;
+
+            if (boundsW < 10 || boundsH < 10 || count < 100) return null;
+
+            return { x: minX, y: minY, w: boundsW, h: boundsH };
+        }
+
+        function drawGuideFrame() {
+            // Рисуем полупрозрачный контур карты по центру как подсказку
+            const guideW = canvas.width * 0.6;
+            const guideH = guideW / CARD_ASPECT;
+            const guideX = (canvas.width - guideW) / 2;
+            const guideY = (canvas.height - guideH) / 2;
+
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 5]);
+            ctx.strokeRect(guideX, guideY, guideW, guideH);
+            ctx.setLineDash([]);
+
+            // Подпись
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = '12px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('Карта', guideX + guideW / 2, guideY - 8);
+        }
+
+        function drawDetectedCard(rect) {
+            ctx.strokeStyle = '#4caf50';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([]);
+            ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+            // Размер в пикселях
+            ctx.fillStyle = '#4caf50';
+            ctx.font = 'bold 14px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                Math.round(rect.width) + '×' + Math.round(rect.height) + ' px',
+                rect.x + rect.width / 2,
+                rect.y - 10
+            );
+        }
+
+        function drawNoCardWarning() {
+            // Ничего не рисуем дополнительно — рамка-подсказка уже есть
         }
 
         function captureCalibration() {
-            scale = canvas.width / 86; // временно
-            currentStep = 'calibrated';
-            statusDiv.textContent = 'Калибровка выполнена. Наведите камеру на стену.';
-            statusDiv.className = 'status-bar ready';
-            actionBtn.textContent = 'Измерить стену';
+            // Ручной захват: берём текущий кадр и ищем карту
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const cardRect = findCard(imageData, canvas.width, canvas.height);
+
+            if (cardRect) {
+                scale = cardRect.width / CARD_WIDTH_MM;
+                console.log('Ручная калибровка! Масштаб:', scale.toFixed(3), 'px/mm');
+                onCalibrated();
+            } else {
+                // Если карта не найдена — используем временный масштаб
+                statusDiv.textContent = 'Карта не найдена. Используем приблизительный масштаб.';
+                statusDiv.className = 'status-bar error';
+                scale = canvas.width / 500; // очень грубо
+                setTimeout(() => onCalibrated(), 800);
+            }
         }
 
+        function onCalibrated() {
+            // Останавливаем цикл детекта
+            if (calibrationFrameId) {
+                cancelAnimationFrame(calibrationFrameId);
+                calibrationFrameId = null;
+            }
+            calibrationHint.style.display = 'none';
+
+            currentStep = 'calibrated';
+            statusDiv.textContent = '✅ Калибровка выполнена. Наведите камеру на стену.';
+            statusDiv.className = 'status-bar ready';
+            actionBtn.textContent = 'Измерить стену';
+            actionBtn.className = 'btn';
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // ═══════════════════════════════════════
+        // ЗАМЕР СТЕНЫ (пока демо)
+        // ═══════════════════════════════════════
         function startMeasurement() {
             currentStep = 'measuring';
             statusDiv.textContent = 'Наведите камеру так, чтобы стена была видна целиком.';
@@ -445,17 +702,17 @@
             const length = 3.4;
             const height = 2.6;
             const area = length * height;
-            
+
             document.getElementById('resLength').textContent = length.toFixed(1) + ' м';
             document.getElementById('resHeight').textContent = height.toFixed(1) + ' м';
             document.getElementById('resArea').textContent = area.toFixed(1) + ' м²';
             document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
             document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
-            document.getElementById('resTip').textContent = 
-                area > 12 
+            document.getElementById('resTip').textContent =
+                area > 12
                     ? '👍 Просторная стена. Поместится диван 3 м и шкаф 1.8 м.'
                     : '⚠️ Компактная стена. Рекомендуем мебель не длиннее 2 м.';
-            
+
             resultsDiv.classList.add('visible');
             currentStep = 'done';
             statusDiv.textContent = 'Замер выполнен!';
@@ -484,6 +741,9 @@
             }
             if (ambientSensor) {
                 ambientSensor.stop();
+            }
+            if (calibrationFrameId) {
+                cancelAnimationFrame(calibrationFrameId);
             }
         });
 
