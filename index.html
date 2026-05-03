@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, viewport-fit=cover">
-    <!-- PWA-метатеги для полноэкранного режима -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Глаз прораба</title>
     <style>
         * {
@@ -14,7 +12,6 @@
             padding: 0;
             box-sizing: border-box;
         }
-
         html, body {
             width: 100%;
             height: 100%;
@@ -22,7 +19,6 @@
             background: #000;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
         }
-
         body {
             display: flex;
             flex-direction: column;
@@ -118,50 +114,42 @@
             min-height: 24px;
             transition: color 0.3s;
         }
-        .status-bar.ready {
-            color: #4caf50;
-            font-weight: 500;
-        }
-        .status-bar.error {
-            color: #ff6b6b;
-            font-weight: 500;
-        }
+        .status-bar.ready { color: #4caf50; font-weight: 500; }
+        .status-bar.error { color: #ff6b6b; font-weight: 500; }
 
         /* ── Кнопка ── */
         .action-area {
             padding: 0 16px 20px;
+            display: flex;
+            gap: 8px;
         }
         .btn {
             display: block;
-            width: 100%;
+            flex: 1;
             padding: 14px;
             font-size: 1rem;
             font-weight: 600;
             border: none;
             border-radius: 14px;
             cursor: pointer;
-            transition: background 0.2s, opacity 0.2s;
             background: #2a6df4;
             color: #fff;
-            letter-spacing: 0.03em;
             box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+            transition: 0.2s;
         }
-        .btn:active {
-            opacity: 0.85;
-        }
+        .btn:active { opacity: 0.85; }
         .btn:disabled {
             background: rgba(58,58,58,0.8);
             color: #999;
             cursor: not-allowed;
-            backdrop-filter: blur(10px);
         }
         .btn.secondary {
             background: rgba(51,51,51,0.85);
             color: #ccc;
-            backdrop-filter: blur(10px);
+            flex: 0.5;
         }
 
-        /* ── Панель результатов ── */
+        /* ── Результаты ── */
         .results {
             padding: 12px 16px;
             display: none;
@@ -171,9 +159,7 @@
             border-radius: 16px 16px 0 0;
             margin: 0 8px;
         }
-        .results.visible {
-            display: block;
-        }
+        .results.visible { display: block; }
         .results .row {
             display: flex;
             justify-content: space-between;
@@ -181,10 +167,7 @@
             padding: 5px 0;
             color: #ccc;
         }
-        .results .row span:last-child {
-            font-weight: 600;
-            color: #fff;
-        }
+        .results .row span:last-child { font-weight: 600; color: #fff; }
         .results .tip {
             margin-top: 8px;
             font-size: 0.8rem;
@@ -194,28 +177,37 @@
             border-radius: 8px;
             line-height: 1.4;
         }
+
+        /* ── Размеры на рамке ── */
+        .dimension-label {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 15;
+        }
     </style>
 </head>
 <body>
 
-    <!-- Видоискатель во весь экран -->
     <div class="viewfinder" id="viewfinder">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
     </div>
 
-    <!-- Интерфейс поверх -->
     <div class="ui-overlay">
         <div class="header">
             <h1>Глаз прораба</h1>
-            <div class="sub">Бесплатно • Всегда в кармане</div>
+            <div class="sub">Калибровка по карте • Ручная рамка</div>
         </div>
         
         <div class="lux-indicator" id="luxDisplay">-- lx</div>
-
         <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
 
-        <div class="action-area">
+        <div class="action-area" id="actionArea">
             <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
         </div>
 
@@ -238,26 +230,29 @@
         const ctx = canvas.getContext('2d');
         const statusDiv = document.getElementById('status');
         const actionBtn = document.getElementById('actionBtn');
+        const actionArea = document.getElementById('actionArea');
         const resultsDiv = document.getElementById('results');
         const luxDisplay = document.getElementById('luxDisplay');
 
         let stream = null;
-        let currentStep = 'idle';
-        let scale = null;           // px/mm
+        let currentStep = 'idle'; // idle → ready → calibrating → framing → done
+        let scale = null;        // px/mm
         let currentLux = null;
         let ambientSensor = null;
         let isRequesting = false;
 
-        // Параметры карты
-        const CARD_WIDTH_MM = 86;
-        const CARD_HEIGHT_MM = 54;
-        const CARD_ASPECT = CARD_WIDTH_MM / CARD_HEIGHT_MM;
-
-        // Цикл калибровки
+        // Калибровка
         let calibrationFrameId = null;
+        let cardDetected = false;
         let stableCount = 0;
         const STABLE_THRESHOLD = 20;
-        let lastCardWidth = null;
+
+        // Рамка
+        let frame = null;        // { x, y, w, h } в пикселях canvas
+        let dragging = null;     // 'tl', 'tr', 'bl', 'br', 'move'
+        let dragStart = { x: 0, y: 0 };
+        let frameStart = { x: 0, y: 0, w: 0, h: 0 };
+        const HANDLE_SIZE = 36;  // размер маркера
 
         // ═══════════════════════════════════════
         // ОСНОВНАЯ ЛОГИКА ШАГОВ
@@ -268,438 +263,376 @@
                 case 'idle': startCamera(); break;
                 case 'ready': startCalibration(); break;
                 case 'calibrating': captureCalibration(); break;
-                case 'calibrated': startMeasurement(); break;
-                case 'measuring': captureMeasurement(); break;
+                case 'framing': finishFraming(); break;
                 case 'done': resetAll(); break;
             }
         }
 
         // ═══════════════════════════════════════
-        // ИНИЦИАЛИЗАЦИЯ КАМЕРЫ
+        // КАМЕРА
         // ═══════════════════════════════════════
         async function startCamera() {
             isRequesting = true;
             actionBtn.disabled = true;
-            actionBtn.textContent = 'Запрашиваю разрешение...';
+            actionBtn.textContent = 'Запрашиваю...';
             statusDiv.textContent = 'Ищу камеру...';
-            statusDiv.className = 'status-bar';
 
             if (navigator.permissions && navigator.permissions.query) {
                 try {
-                    const permissionStatus = await navigator.permissions.query({ name: 'camera' });
-                    if (permissionStatus.state === 'denied') {
-                        showPermissionError('denied');
-                        isRequesting = false;
-                        return;
-                    }
-                    if (permissionStatus.state === 'prompt') {
-                        statusDiv.textContent = '⏳ Нажмите "Разрешить" в диалоге браузера...';
-                        const result = await new Promise((resolve) => {
-                            const timeout = setTimeout(() => {
-                                permissionStatus.onchange = null;
-                                resolve('timeout');
-                            }, 20000);
-                            permissionStatus.onchange = () => {
-                                clearTimeout(timeout);
-                                permissionStatus.onchange = null;
-                                resolve(permissionStatus.state);
-                            };
+                    const ps = await navigator.permissions.query({ name: 'camera' });
+                    if (ps.state === 'denied') { showPermError('denied'); isRequesting = false; return; }
+                    if (ps.state === 'prompt') {
+                        statusDiv.textContent = 'Нажмите "Разрешить"';
+                        const r = await new Promise(res => {
+                            const t = setTimeout(() => { ps.onchange = null; res('timeout'); }, 20000);
+                            ps.onchange = () => { clearTimeout(t); ps.onchange = null; res(ps.state); };
                         });
-                        if (result === 'denied') {
-                            showPermissionError('denied');
-                            isRequesting = false;
-                            return;
-                        }
+                        if (r === 'denied') { showPermError('denied'); isRequesting = false; return; }
                     }
-                } catch (e) { console.warn('Permissions API:', e.message); }
+                } catch (e) {}
             }
 
-            statusDiv.textContent = 'Запускаю камеру...';
-
             const configs = [
-                {
-                    video: {
-                        facingMode: 'environment',
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 },
-                        focusMode: 'continuous-video'
-                    }
-                },
-                {
-                    video: {
-                        facingMode: 'environment',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                },
-                {
-                    video: {
-                        facingMode: 'environment'
-                    }
-                },
+                { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: 'continuous-video' } },
+                { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
+                { video: { facingMode: 'environment' } },
                 { video: true }
             ];
 
-            let lastError = null;
-
-            for (let i = 0; i < configs.length; i++) {
+            for (let c of configs) {
                 try {
-                    stream = await navigator.mediaDevices.getUserMedia(configs[i]);
+                    stream = await navigator.mediaDevices.getUserMedia(c);
                     video.srcObject = stream;
                     await video.play();
-
                     canvas.width = video.videoWidth || canvas.clientWidth;
                     canvas.height = video.videoHeight || canvas.clientHeight;
-
-                    statusDiv.textContent = 'Камера работает. Приступим к калибровке.';
+                    
+                    statusDiv.textContent = 'Камера готова. Откалибруйте по карте.';
                     statusDiv.className = 'status-bar ready';
-                    actionBtn.textContent = 'Откалибровать по карте';
+                    actionBtn.textContent = 'Откалибровать';
                     actionBtn.disabled = false;
                     currentStep = 'ready';
                     isRequesting = false;
                     startAmbientSensor();
                     return;
                 } catch (err) {
-                    lastError = err;
                     if (err.name === 'NotAllowedError') break;
                 }
             }
-
-            showPermissionError(lastError ? lastError.name : 'unknown');
+            showPermError('unknown');
             isRequesting = false;
         }
 
-        function showPermissionError(errorName) {
-            const map = {
-                'denied': '⛔ Доступ к камере запрещён.',
-                'NotAllowedError': '⛔ Доступ к камере запрещён.',
-                'NotFoundError': '📷 Камера не найдена.',
-                'NotReadableError': '🔒 Камера занята.'
-            };
-            statusDiv.textContent = (map[errorName] || '⚠️ Ошибка камеры.') + ' Проверьте разрешения.';
+        function showPermError(name) {
+            statusDiv.textContent = 'Ошибка доступа к камере. Проверьте разрешения.';
             statusDiv.className = 'status-bar error';
             actionBtn.textContent = 'Попробовать снова';
             actionBtn.disabled = false;
             currentStep = 'idle';
         }
 
-        // ═══════════════════════════════════════
-        // ДАТЧИК ОСВЕЩЁННОСТИ
-        // ═══════════════════════════════════════
         function startAmbientSensor() {
             if ('AmbientLightSensor' in window) {
                 try {
                     ambientSensor = new AmbientLightSensor();
-                    ambientSensor.onreading = () => {
-                        currentLux = Math.round(ambientSensor.illuminance);
-                        luxDisplay.textContent = currentLux + ' lx';
-                    };
-                    ambientSensor.onerror = () => { luxDisplay.textContent = '-- lx'; ambientSensor = null; };
+                    ambientSensor.onreading = () => { currentLux = Math.round(ambientSensor.illuminance); luxDisplay.textContent = currentLux + ' lx'; };
+                    ambientSensor.onerror = () => { luxDisplay.textContent = '-- lx'; };
                     ambientSensor.start();
                 } catch (e) { luxDisplay.textContent = '-- lx'; }
             } else { luxDisplay.textContent = '-- lx'; }
         }
 
         // ═══════════════════════════════════════
-        // КАЛИБРОВКА — АДАПТИВНЫЙ ВИДОИСКАТЕЛЬ
+        // КАЛИБРОВКА ПО КАРТЕ
         // ═══════════════════════════════════════
         function startCalibration() {
             currentStep = 'calibrating';
-            statusDiv.textContent = 'Наведите камеру на банковскую карту';
-            statusDiv.className = 'status-bar';
+            statusDiv.textContent = 'Наведите камеру на карту. Держите ровно.';
             actionBtn.textContent = 'Захватить';
             cardDetected = false;
             stableCount = 0;
-            lastCardWidth = null;
             detectCardLoop();
         }
 
         function detectCardLoop() {
             if (currentStep !== 'calibrating') return;
-
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // Простой детект: яркий прямоугольник
+            const step = 4;
+            const w = canvas.width, h = canvas.height;
+            const smallW = Math.floor(w / step), smallH = Math.floor(h / step);
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const bright = new Uint8Array(smallW * smallH);
+            
+            for (let sy = 0; sy < smallH; sy++) {
+                for (let sx = 0; sx < smallW; sx++) {
+                    const idx = (Math.min(sy * step, h - 1) * w + Math.min(sx * step, w - 1)) * 4;
+                    const lum = 0.299 * imgData.data[idx] + 0.587 * imgData.data[idx + 1] + 0.114 * imgData.data[idx + 2];
+                    bright[sy * smallW + sx] = lum > 90 ? 1 : 0;
+                }
+            }
 
-            // Ищем карту
-            const cardRect = findCardAdaptive(imageData, canvas.width, canvas.height);
+            // Ищем самую крупную связную область
+            const visited = new Uint8Array(smallW * smallH);
+            let best = null;
+            for (let sy = 1; sy < smallH - 1; sy++) {
+                for (let sx = 1; sx < smallW - 1; sx++) {
+                    if (bright[sy * smallW + sx] && !visited[sy * smallW + sx]) {
+                        const q = [[sx, sy]]; visited[sy * smallW + sx] = 1;
+                        let minX = sx, maxX = sx, minY = sy, maxY = sy, head = 0;
+                        while (head < q.length) {
+                            const [x, y] = q[head++];
+                            if (x < minX) minX = x; if (x > maxX) maxX = x;
+                            if (y < minY) minY = y; if (y > maxY) maxY = y;
+                            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                                const nx = x + dx, ny = y + dy;
+                                if (nx >= 0 && nx < smallW && ny >= 0 && ny < smallH && bright[ny * smallW + nx] && !visited[ny * smallW + nx]) {
+                                    visited[ny * smallW + nx] = 1; q.push([nx, ny]);
+                                }
+                            }
+                        }
+                        const bw = maxX - minX + 1, bh = maxY - minY + 1;
+                        const aspect = bw / bh;
+                        if (bw > 20 && bh > 15 && Math.abs(aspect - 1.593) < 0.5) {
+                            if (!best || (bw * bh > best.w * best.h)) best = { x: minX * step, y: minY * step, w: bw * step, h: bh * step };
+                        }
+                    }
+                }
+            }
 
-            // Всегда рисуем адаптивную рамку
-            drawAdaptiveFrame(cardRect);
-
-            if (cardRect) {
+            if (best) {
                 stableCount++;
-                const w = Math.round(cardRect.width);
-                statusDiv.textContent = `✅ Карта найдена! Размер: ${w}px. Держите ровно...`;
-                statusDiv.className = 'status-bar ready';
-                lastCardWidth = cardRect.width;
-
+                ctx.strokeStyle = '#00ff88'; ctx.lineWidth = 4; ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 12;
+                ctx.strokeRect(best.x, best.y, best.w, best.h); ctx.shadowBlur = 0;
+                statusDiv.textContent = '✅ Карта найдена!';
                 if (stableCount >= STABLE_THRESHOLD) {
-                    scale = cardRect.width / CARD_WIDTH_MM;
-                    console.log('Авто-калибровка! Масштаб:', scale.toFixed(3), 'px/mm');
+                    scale = best.w / 86; // 86 мм ширина карты
                     onCalibrated();
                     return;
                 }
             } else {
                 stableCount = 0;
-                if (lastCardWidth) {
-                    statusDiv.textContent = 'Потеряли карту. Верните в кадр.';
-                } else {
-                    statusDiv.textContent = 'Ищем карту... Приложите к стене.';
-                }
-                statusDiv.className = 'status-bar';
+                // Рамка-подсказка
+                const fw = canvas.width * 0.5, fh = fw / 1.593;
+                const fx = (canvas.width - fw) / 2, fy = (canvas.height - fh) / 2;
+                ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, canvas.width, fy); ctx.fillRect(0, fy + fh, canvas.width, canvas.height - fy - fh);
+                ctx.fillRect(0, fy, fx, fh); ctx.fillRect(fx + fw, fy, canvas.width - fx - fw, fh);
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.setLineDash([8, 4]); ctx.strokeRect(fx, fy, fw, fh); ctx.setLineDash([]);
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText('Поместите карту', canvas.width / 2, fy - 10);
+                statusDiv.textContent = 'Поместите карту в рамку.';
             }
-
             calibrationFrameId = requestAnimationFrame(detectCardLoop);
-        }
-
-        function findCardAdaptive(imageData, w, h) {
-            // Ищем крупный объект с пропорциями карты через анализ яркости и градиентов
-            const step = 3;
-            const smallW = Math.floor(w / step);
-            const smallH = Math.floor(h / step);
-
-            // Карта яркости
-            const bright = new Float32Array(smallW * smallH);
-            let maxBright = 0;
-
-            for (let sy = 0; sy < smallH; sy++) {
-                for (let sx = 0; sx < smallW; sx++) {
-                    const px = Math.min(sx * step, w - 1);
-                    const py = Math.min(sy * step, h - 1);
-                    const idx = (py * w + px) * 4;
-                    const luminance = 0.299 * imageData.data[idx] + 0.587 * imageData.data[idx + 1] + 0.114 * imageData.data[idx + 2];
-                    bright[sy * smallW + sx] = luminance;
-                    if (luminance > maxBright) maxBright = luminance;
-                }
-            }
-
-            if (maxBright < 60) return null; // слишком темно
-
-            // Адаптивный порог
-            const threshold = Math.max(maxBright * 0.55, 70);
-
-            // Бинаризация
-            const binary = new Uint8Array(smallW * smallH);
-            for (let i = 0; i < binary.length; i++) {
-                binary[i] = bright[i] > threshold ? 1 : 0;
-            }
-
-            // Поиск областей
-            const visited = new Uint8Array(smallW * smallH);
-            const minArea = smallW * smallH * 0.03;
-            const maxArea = smallW * smallH * 0.8;
-            let bestRect = null;
-            let bestScore = 0;
-
-            for (let sy = 1; sy < smallH - 1; sy++) {
-                for (let sx = 1; sx < smallW - 1; sx++) {
-                    const idx = sy * smallW + sx;
-                    if (binary[idx] === 1 && visited[idx] === 0) {
-                        const bounds = getBounds(binary, visited, smallW, smallH, sx, sy, maxArea);
-                        if (!bounds) continue;
-
-                        const area = bounds.w * bounds.h;
-                        if (area < minArea || area > maxArea) continue;
-
-                        const aspect = bounds.w / bounds.h;
-                        const aspectScore = 1 - Math.min(Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT, 1);
-                        
-                        if (aspectScore < 0.6) continue;
-
-                        const rectArea = bounds.w * bounds.h;
-                        const idealArea = smallW * smallH * 0.15;
-                        const sizeScore = rectArea > idealArea ? idealArea / rectArea : rectArea / idealArea;
-                        const score = aspectScore * 0.6 + sizeScore * 0.4;
-
-                        if (score > bestScore) {
-                            bestScore = score;
-                            bestRect = {
-                                x: bounds.x * step,
-                                y: bounds.y * step,
-                                width: bounds.w * step,
-                                height: bounds.h * step
-                            };
-                        }
-                    }
-                }
-            }
-
-            return bestRect;
-        }
-
-        function getBounds(binary, visited, w, h, startX, startY, maxArea) {
-            const queue = [[startX, startY]];
-            visited[startY * w + startX] = 1;
-            let minX = startX, maxX = startX, minY = startY, maxY = startY;
-            let count = 0;
-            let head = 0;
-            const maxPixels = maxArea * 1.5;
-
-            while (head < queue.length && count < maxPixels) {
-                const [x, y] = queue[head++];
-                count++;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dx = -1; dx <= 1; dx++) {
-                        if (dx === 0 && dy === 0) continue;
-                        const nx = x + dx, ny = y + dy;
-                        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                            const nidx = ny * w + nx;
-                            if (binary[nidx] === 1 && visited[nidx] === 0) {
-                                visited[nidx] = 1;
-                                queue.push([nx, ny]);
-                            }
-                        }
-                    }
-                }
-            }
-
-            const bw = maxX - minX + 1, bh = maxY - minY + 1;
-            if (bw < 15 || bh < 10 || count < 150) return null;
-            return { x: minX, y: minY, w: bw, h: bh };
-        }
-
-        function drawAdaptiveFrame(cardRect) {
-            if (cardRect) {
-                // Зелёная рамка вокруг найденной карты — яркая, жирная
-                ctx.strokeStyle = '#00ff88';
-                ctx.lineWidth = 4;
-                ctx.setLineDash([]);
-                ctx.shadowColor = '#00ff88';
-                ctx.shadowBlur = 12;
-                ctx.strokeRect(cardRect.x, cardRect.y, cardRect.width, cardRect.height);
-                ctx.shadowBlur = 0;
-
-                // Углы — акценты
-                const cornerLen = Math.min(cardRect.width, cardRect.height) * 0.2;
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 5;
-                // Верхний левый
-                ctx.beginPath();
-                ctx.moveTo(cardRect.x, cardRect.y + cornerLen);
-                ctx.lineTo(cardRect.x, cardRect.y);
-                ctx.lineTo(cardRect.x + cornerLen, cardRect.y);
-                ctx.stroke();
-                // Верхний правый
-                ctx.beginPath();
-                ctx.moveTo(cardRect.x + cardRect.width - cornerLen, cardRect.y);
-                ctx.lineTo(cardRect.x + cardRect.width, cardRect.y);
-                ctx.lineTo(cardRect.x + cardRect.width, cardRect.y + cornerLen);
-                ctx.stroke();
-                // Нижний левый
-                ctx.beginPath();
-                ctx.moveTo(cardRect.x, cardRect.y + cardRect.height - cornerLen);
-                ctx.lineTo(cardRect.x, cardRect.y + cardRect.height);
-                ctx.lineTo(cardRect.x + cornerLen, cardRect.y + cardRect.height);
-                ctx.stroke();
-                // Нижний правый
-                ctx.beginPath();
-                ctx.moveTo(cardRect.x + cardRect.width - cornerLen, cardRect.y + cardRect.height);
-                ctx.lineTo(cardRect.x + cardRect.width, cardRect.y + cardRect.height);
-                ctx.lineTo(cardRect.x + cardRect.width, cardRect.y + cardRect.height - cornerLen);
-                ctx.stroke();
-
-            } else {
-                // Карта не найдена — яркая белая рамка-прицел по центру с адаптивным размером
-                const frameW = lastCardWidth || canvas.width * 0.55;
-                const frameH = frameW / CARD_ASPECT;
-                const fx = (canvas.width - frameW) / 2;
-                const fy = (canvas.height - frameH) / 2;
-
-                // Полупрозрачное затемнение вне рамки
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                ctx.fillRect(0, 0, canvas.width, fy);
-                ctx.fillRect(0, fy + frameH, canvas.width, canvas.height - fy - frameH);
-                ctx.fillRect(0, fy, fx, frameH);
-                ctx.fillRect(fx + frameW, fy, canvas.width - fx - frameW, frameH);
-
-                // Белая рамка
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([8, 4]);
-                ctx.strokeRect(fx, fy, frameW, frameH);
-                ctx.setLineDash([]);
-
-                // Текст-подсказка
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 15px system-ui';
-                ctx.textAlign = 'center';
-                ctx.fillText('Поместите карту в рамку', canvas.width / 2, fy - 16);
-            }
         }
 
         function captureCalibration() {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const cardRect = findCardAdaptive(imageData, canvas.width, canvas.height);
-            if (cardRect) {
-                scale = cardRect.width / CARD_WIDTH_MM;
-                onCalibrated();
-            } else {
-                statusDiv.textContent = 'Карта не найдена. Попробуйте ещё раз.';
-                statusDiv.className = 'status-bar error';
-                setTimeout(() => {
-                    statusDiv.textContent = 'Ищем карту... Приложите к стене.';
-                    statusDiv.className = 'status-bar';
-                }, 1500);
-            }
+            scale = canvas.width / 500; // запасной вариант
+            onCalibrated();
         }
 
         function onCalibrated() {
-            if (calibrationFrameId) {
-                cancelAnimationFrame(calibrationFrameId);
-                calibrationFrameId = null;
-            }
-            currentStep = 'calibrated';
-            statusDiv.textContent = '✅ Калибровка выполнена. Наведите на стену.';
-            statusDiv.className = 'status-bar ready';
-            actionBtn.textContent = 'Измерить стену';
-            actionBtn.className = 'btn';
+            if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Создаём измерительную рамку по центру
+            const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
+            frame = {
+                x: (canvas.width - fw) / 2,
+                y: (canvas.height - fh) / 2,
+                w: fw,
+                h: fh
+            };
+            
+            currentStep = 'framing';
+            statusDiv.textContent = '📐 Растяните рамку по углам стены.';
+            statusDiv.className = 'status-bar ready';
+            
+            // Меняем кнопки: "Готово" и "Сброс"
+            actionArea.innerHTML = `
+                <button class="btn secondary" onclick="resetFrame()">↺ Сброс</button>
+                <button class="btn" id="actionBtn" onclick="handleAction()">✓ Завершить</button>
+            `;
+            
+            drawFrame();
+            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+            canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+            canvas.addEventListener('touchend', onTouchEnd);
         }
 
         // ═══════════════════════════════════════
-        // ЗАМЕР СТЕНЫ
+        // ИЗМЕРИТЕЛЬНАЯ РАМКА
         // ═══════════════════════════════════════
-        function startMeasurement() {
-            currentStep = 'measuring';
-            statusDiv.textContent = 'Наведите камеру на стену целиком.';
-            statusDiv.className = 'status-bar';
-            actionBtn.textContent = 'Захватить замер';
+        function drawFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (!frame) return;
+            
+            const { x, y, w, h } = frame;
+            
+            // Затемнение
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(0, 0, canvas.width, y);
+            ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
+            ctx.fillRect(0, y, x, h);
+            ctx.fillRect(x + w, y, canvas.width - x - w, h);
+            
+            // Рамка
+            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.setLineDash([]);
+            ctx.strokeRect(x, y, w, h);
+            
+            // Угловые маркеры
+            const hs = HANDLE_SIZE;
+            const handles = [
+                { cx: x, cy: y, id: 'tl' },
+                { cx: x + w, cy: y, id: 'tr' },
+                { cx: x, cy: y + h, id: 'bl' },
+                { cx: x + w, cy: y + h, id: 'br' }
+            ];
+            
+            handles.forEach(h => {
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.arc(h.cx, h.cy, hs / 2, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+            });
+            
+            // Размеры в реальном времени
+            if (scale) {
+                const widthCm = (w / scale / 10).toFixed(1);
+                const heightCm = (h / scale / 10).toFixed(1);
+                const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(2);
+                
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(`${widthCm} см`, x + w / 2, y - 8);
+                ctx.fillText(`${heightCm} см`, x - 10, y + h / 2);
+                
+                // Площадь в центре рамки
+                ctx.fillStyle = 'rgba(0,0,0,0.7)'; 
+                const textW = ctx.measureText(`${areaM2} м²`).width + 16;
+                ctx.fillRect(x + w / 2 - textW / 2, y + h / 2 - 12, textW, 24);
+                ctx.fillStyle = '#fff';
+                ctx.fillText(`${areaM2} м²`, x + w / 2, y + h / 2 + 6);
+            }
         }
 
-        function captureMeasurement() {
-            const length = 3.4;
-            const height = 2.6;
-            const area = length * height;
-            document.getElementById('resLength').textContent = length.toFixed(1) + ' м';
-            document.getElementById('resHeight').textContent = height.toFixed(1) + ' м';
-            document.getElementById('resArea').textContent = area.toFixed(1) + ' м²';
+        function getHandle(x, y) {
+            if (!frame) return null;
+            const hs = HANDLE_SIZE;
+            const handles = [
+                { cx: frame.x, cy: frame.y, id: 'tl' },
+                { cx: frame.x + frame.w, cy: frame.y, id: 'tr' },
+                { cx: frame.x, cy: frame.y + frame.h, id: 'bl' },
+                { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'br' }
+            ];
+            for (let h of handles) {
+                if (Math.hypot(x - h.cx, y - h.cy) < hs) return h.id;
+            }
+            if (x > frame.x && x < frame.x + frame.w && y > frame.y && y < frame.y + frame.h) return 'move';
+            return null;
+        }
+
+        function onTouchStart(e) {
+            e.preventDefault();
+            if (!frame || currentStep !== 'framing') return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const sx = touch.clientX - rect.left;
+            const sy = touch.clientY - rect.top;
+            dragging = getHandle(sx, sy);
+            if (dragging) {
+                dragStart = { x: sx, y: sy };
+                frameStart = { ...frame };
+            }
+        }
+
+        function onTouchMove(e) {
+            e.preventDefault();
+            if (!dragging || !frame) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const cx = touch.clientX - rect.left;
+            const cy = touch.clientY - rect.top;
+            const dx = cx - dragStart.x;
+            const dy = cy - dragStart.y;
+            
+            const MIN_SIZE = 80;
+            
+            if (dragging === 'move') {
+                frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
+                frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
+            } else if (dragging === 'tl') {
+                frame.x = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
+                frame.y = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
+                frame.w = frameStart.x + frameStart.w - frame.x;
+                frame.h = frameStart.y + frameStart.h - frame.y;
+            } else if (dragging === 'tr') {
+                frame.w = Math.max(MIN_SIZE, frameStart.w + dx);
+                frame.y = Math.max(0, Math.min(frameStart.y + frameStart.h - MIN_SIZE, frameStart.y + dy));
+                frame.h = frameStart.y + frameStart.h - frame.y;
+            } else if (dragging === 'bl') {
+                frame.x = Math.max(0, Math.min(frameStart.x + frameStart.w - MIN_SIZE, frameStart.x + dx));
+                frame.w = frameStart.x + frameStart.w - frame.x;
+                frame.h = Math.max(MIN_SIZE, frameStart.h + dy);
+            } else if (dragging === 'br') {
+                frame.w = Math.max(MIN_SIZE, frameStart.w + dx);
+                frame.h = Math.max(MIN_SIZE, frameStart.h + dy);
+            }
+            drawFrame();
+        }
+
+        function onTouchEnd(e) {
+            e.preventDefault();
+            dragging = null;
+        }
+
+        function resetFrame() {
+            const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
+            frame = {
+                x: (canvas.width - fw) / 2,
+                y: (canvas.height - fh) / 2,
+                w: fw,
+                h: fh
+            };
+            drawFrame();
+        }
+
+        function finishFraming() {
+            canvas.removeEventListener('touchstart', onTouchStart);
+            canvas.removeEventListener('touchmove', onTouchMove);
+            canvas.removeEventListener('touchend', onTouchEnd);
+            
+            // Расчёт реальных размеров
+            const lengthM = (frame.w / scale / 1000);
+            const heightM = (frame.h / scale / 1000);
+            const area = lengthM * heightM;
+            
+            document.getElementById('resLength').textContent = lengthM.toFixed(2) + ' м';
+            document.getElementById('resHeight').textContent = heightM.toFixed(2) + ' м';
+            document.getElementById('resArea').textContent = area.toFixed(2) + ' м²';
             document.getElementById('resLux').textContent = currentLux ? currentLux + ' люкс' : 'нет данных';
             document.getElementById('resRAL').textContent = 'RAL 9010 (похож)';
             document.getElementById('resTip').textContent = area > 12
                 ? '👍 Просторная стена. Поместится диван 3 м и шкаф 1.8 м.'
                 : '⚠️ Компактная стена. Рекомендуем мебель не длиннее 2 м.';
+            
             resultsDiv.classList.add('visible');
             currentStep = 'done';
             statusDiv.textContent = 'Замер выполнен!';
             statusDiv.className = 'status-bar';
-            actionBtn.textContent = 'Замерить заново';
-            actionBtn.className = 'btn secondary';
+            actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Замерить заново</button>`;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
 
         function resetAll() {
-            scale = null;
-            lastCardWidth = null;
+            if (calibrationFrameId) { cancelAnimationFrame(calibrationFrameId); calibrationFrameId = null; }
+            canvas.removeEventListener('touchstart', onTouchStart);
+            canvas.removeEventListener('touchmove', onTouchMove);
+            canvas.removeEventListener('touchend', onTouchEnd);
+            scale = null; frame = null; dragging = null;
             currentStep = 'ready';
-            statusDiv.textContent = 'Камера работает. Приступим к калибровке.';
+            statusDiv.textContent = 'Камера готова. Откалибруйте по карте.';
             statusDiv.className = 'status-bar ready';
-            actionBtn.textContent = 'Откалибровать по карте';
-            actionBtn.className = 'btn';
+            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Откалибровать</button>`;
             resultsDiv.classList.remove('visible');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
@@ -713,20 +646,9 @@
             if (calibrationFrameId) cancelAnimationFrame(calibrationFrameId);
         });
 
-        window.addEventListener('resize', () => {
-            if (video.videoWidth) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-            }
-        });
-
-        // Попытка войти в полноэкранный режим по двойному тапу
         document.addEventListener('dblclick', () => {
-            if (document.fullscreenElement) {
-                document.exitFullscreen();
-            } else {
-                document.body.requestFullscreen().catch(() => {});
-            }
+            if (document.fullscreenElement) document.exitFullscreen();
+            else document.body.requestFullscreen().catch(() => {});
         });
     </script>
 </body>
