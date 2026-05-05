@@ -166,80 +166,7 @@
         } else { luxDisplay.textContent = '-- lx'; }
     }
 
-    // ── ЖИВАЯ КАЛИБРОВКА: ШАГ 1 (10 см) ──
-    function startLiveCalibration() {
-        currentStep = 'calibrating';
-        liveStep = 'step1';
-        captureCount = 0;
-        P1 = null;
-        P2 = null;
-        
-        statusDiv.textContent = '🔴 Шаг 1/3: Поднесите монету близко к камере (~10 см).';
-        statusDiv.className = 'status-bar';
-        actionArea.innerHTML = ``;
-        dot1.className = 'step-dot active'; dot2.className = 'step-dot'; dot3.className = 'step-dot';
-        
-        liveLoop();
-    }
-
-    function startLiveStep2() {
-        liveStep = 'step2';
-        captureCount = 0;
-        
-        statusDiv.textContent = '🟠 Шаг 2/3: Отведите монету дальше (~20 см).';
-        dot1.className = 'step-dot done'; dot2.className = 'step-dot active'; dot3.className = 'step-dot';
-        
-        liveLoop();
-    }
-
-    function liveLoop() {
-        if (currentStep !== 'calibrating') return;
-        
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Размер круга зависит от шага
-        // Для шага 1 (10 см): монета близко → большой круг
-        // Для шага 2 (20 см): монета дальше → круг в 2 раза меньше
-        const baseRadius = canvas.width * 0.22;
-        const radius = liveStep === 'step1' ? baseRadius : baseRadius / 2;
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-        const color = liveStep === 'step1' ? '#ff4444' : '#ff8800';
-        
-        // Анализ яркости внутри круга
-        let innerSum = 0, innerCount = 0;
-        let outerSum = 0, outerCount = 0;
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
-        for (let y = 0; y < canvas.height; y += 3) {
-            for (let x = 0; x < canvas.width; x += 3) {
-                const dist = Math.hypot(x - cx, y - cy);
-                const idx = (y * canvas.width + x) * 4;
-                const bright = (imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2]) / 3;
-                
-                if (dist < radius * 0.8) {
-                    innerSum += bright;
-                    innerCount++;
-                } else if (dist > radius * 1.15 && dist < radius * 1.5) {
-                    outerSum += bright;
-                    outerCount++;
-                }
-            }
-        }
-        
-        const innerBright = innerSum / Math.max(innerCount, 1);
-        const outerBright = outerSum / Math.max(outerCount, 1);
-        const coinFills = innerBright > 130 && (innerBright - outerBright) > 30;
-        
-        // Затемнение вне круга
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, canvas.width, canvas.height);
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
-        ctx.fillStyle = 'rgba(0,0,0,0.45)';
-        ctx.fill();
-
-    // ── ЖИВАЯ КАЛИБРОВКА: ШАГ 1 (10 см) ──
+        // ── ЖИВАЯ КАЛИБРОВКА: ШАГ 1 (10 см) ──
     function startLiveCalibration() {
         currentStep = 'calibrating';
         liveStep = 'step1';
@@ -407,8 +334,6 @@
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.stroke();
     }
-    
-    
 
     // ── СТОП-КАДР ОБЪЕКТА ──
     function freezeFrame() {
