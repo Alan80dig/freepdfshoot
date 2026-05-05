@@ -36,7 +36,6 @@
         .results .row { display: flex; justify-content: space-between; font-size: 0.9rem; padding: 6px 0; color: #ccc; }
         .results .row span:last-child { font-weight: 600; color: #fff; font-size: 1rem; }
         .results .tip { margin-top: 8px; font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; }
-        .hint-circle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 0.8rem; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,0.8); z-index: 14; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -49,7 +48,7 @@
 <div class="ui-overlay">
     <div class="header">
         <h1>Глаз прораба</h1>
-        <div class="sub">Триангуляция по монете • Живая калибровка</div>
+        <div class="sub">Триангуляция • Живая калибровка</div>
     </div>
     <div class="step-indicator" id="stepDots">
         <div class="step-dot active" id="dot1"></div>
@@ -84,16 +83,16 @@
     const dot3 = document.getElementById('dot3');
 
     let stream, currentStep = 'idle', currentLux = null, ambientSensor = null;
-    let F_px = null;           // фокусное расстояние камеры в пикселях
+    let F_px = null;
     const COIN_DIAMETER_MM = 25;
-    const D1_MM = 100;         // расстояние до монеты на шаге 1 (10 см)
-    const D2_MM = 200;         // расстояние до монеты на шаге 2 (20 см)
+    const D1_MM = 100;
+    const D2_MM = 200;
     
     // Живая калибровка
-    let liveStep = null;       // 'step1' или 'step2'
+    let liveStep = null;
     let liveFrameId = null;
     let captureCount = 0;
-    const CAPTURE_THRESHOLD = 15;
+    const CAPTURE_THRESHOLD = 20;
     let P1 = null, P2 = null;
     
     // Стоп-кадр и измерение
@@ -104,7 +103,7 @@
     function handleAction() {
         switch (currentStep) {
             case 'idle': startCamera(); break;
-            case 'ready': startLiveCalibration(); break;
+            case 'ready': startLiveStep1(); break;
             case 'step1_done': startLiveStep2(); break;
             case 'step2_done': freezeFrame(); break;
             case 'measuring': finishMeasurement(); break;
@@ -128,7 +127,6 @@
                 canvas.width = video.videoWidth || canvas.clientWidth;
                 canvas.height = video.videoHeight || canvas.clientHeight;
                 
-                // Проверяем localStorage
                 const savedFpx = localStorage.getItem('camera_F_px');
                 if (savedFpx) {
                     F_px = parseFloat(savedFpx);
@@ -140,7 +138,7 @@
                     dot2.className = 'step-dot done';
                     dot3.className = 'step-dot active';
                 } else {
-                    statusDiv.textContent = 'Нажмите «Калибровать» для начала.';
+                    statusDiv.textContent = 'Нажмите «Калибровать».';
                     statusDiv.className = 'status-bar ready';
                     actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">🎯 Калибровать</button>`;
                     currentStep = 'ready';
@@ -166,15 +164,18 @@
         } else { luxDisplay.textContent = '-- lx'; }
     }
 
-        // ── ЖИВАЯ КАЛИБРОВКА: ШАГ 1 (10 см) ──
-    function startLiveCalibration() {
+    // ── ЗАПУСК ШАГА 1 ──
+    function startLiveStep1() {
+        // Очищаем предыдущий цикл если был
+        if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
+        
         currentStep = 'calibrating';
         liveStep = 'step1';
         captureCount = 0;
         P1 = null;
         P2 = null;
         
-        statusDiv.textContent = '🔴 Шаг 1/3: Поднесите монету близко к камере (~10 см).';
+        statusDiv.textContent = '🔴 Шаг 1/3: Поднесите монету близко (~10 см).';
         statusDiv.className = 'status-bar';
         actionArea.innerHTML = ``;
         dot1.className = 'step-dot active'; dot2.className = 'step-dot'; dot3.className = 'step-dot';
@@ -182,60 +183,79 @@
         liveLoop();
     }
 
+    // ── ЗАПУСК ШАГА 2 ──
     function startLiveStep2() {
+        if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
+        
+        currentStep = 'calibrating';
         liveStep = 'step2';
         captureCount = 0;
         
         statusDiv.textContent = '🟠 Шаг 2/3: Отведите монету дальше (~20 см).';
         dot1.className = 'step-dot done'; dot2.className = 'step-dot active'; dot3.className = 'step-dot';
+        actionArea.innerHTML = ``;
         
         liveLoop();
     }
 
     function liveLoop() {
-        if (currentStep !== 'calibrating') return;
+        if (currentStep !== 'calibrating') {
+            console.log('liveLoop: не calibrating, выход');
+            return;
+        }
+        if (!liveStep) {
+            console.log('liveLoop: нет liveStep, выход');
+            return;
+        }
         
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Размер круга: шаг 1 = большой (10 см), шаг 2 = в 2 раза меньше (20 см)
         const baseRadius = canvas.width * 0.22;
         const radius = liveStep === 'step1' ? baseRadius : baseRadius / 2;
         const cx = canvas.width / 2;
         const cy = canvas.height / 2;
         const color = liveStep === 'step1' ? '#ff4444' : '#ff8800';
         
-        // УЛУЧШЕННЫЙ ДЕТЕКТ: проверяем однородность внутри круга
+        // Детекция: яркость И цвет
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         let innerSum = 0, innerCount = 0;
-        let innerValues = [];
+        let hueSum = 0;
         
         for (let y = 0; y < canvas.height; y += 3) {
             for (let x = 0; x < canvas.width; x += 3) {
                 const dist = Math.hypot(x - cx, y - cy);
                 if (dist < radius * 0.75) {
                     const idx = (y * canvas.width + x) * 4;
-                    const bright = (imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2]) / 3;
+                    const r = imageData.data[idx];
+                    const g = imageData.data[idx + 1];
+                    const b = imageData.data[idx + 2];
+                    const bright = (r + g + b) / 3;
                     innerSum += bright;
-                    innerValues.push(bright);
+                    
+                    // Hue (упрощённый)
+                    const maxC = Math.max(r, g, b);
+                    const minC = Math.min(r, g, b);
+                    if (maxC > minC) {
+                        let h = 0;
+                        if (maxC === r) h = ((g - b) / (maxC - minC)) % 6;
+                        else if (maxC === g) h = (b - r) / (maxC - minC) + 2;
+                        else h = (r - g) / (maxC - minC) + 4;
+                        h = h * 60;
+                        if (h < 0) h += 360;
+                        hueSum += h;
+                    }
                     innerCount++;
                 }
             }
         }
         
         const innerBright = innerSum / Math.max(innerCount, 1);
+        const innerHue = hueSum / Math.max(innerCount, 1);
         
-        // Вычисляем дисперсию (однородность)
-        let variance = 0;
-        for (let v of innerValues) {
-            variance += (v - innerBright) ** 2;
-        }
-        variance /= Math.max(innerValues.length, 1);
-        const stdDev = Math.sqrt(variance);
+        // Монета 5₽: яркая (bright > 110) И жёлтая (hue 40-70)
+        const coinFills = innerBright > 110 && innerHue > 35 && innerHue < 75;
         
-        // Монета: яркая И однородная (низкая дисперсия)
-        const coinFills = innerBright > 100 && stdDev < 40;
-        
-        // Затемнение вне круга
+        // Затемнение
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, canvas.width, canvas.height);
@@ -244,19 +264,17 @@
         ctx.fill();
         ctx.restore();
         
-        // Круг
+        // Отрисовка круга
         if (coinFills) {
             captureCount++;
             const progress = Math.min(captureCount / CAPTURE_THRESHOLD, 1);
             
-            // Полный круг с прогресс-дугой
             ctx.beginPath();
             ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
             ctx.lineWidth = 5;
             ctx.stroke();
             
-            // Прогресс-дуга
             ctx.beginPath();
             ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
             ctx.strokeStyle = color;
@@ -266,38 +284,43 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
             
-            const remaining = CAPTURE_THRESHOLD - captureCount;
+            const remaining = Math.max(0, CAPTURE_THRESHOLD - captureCount);
             statusDiv.textContent = `Захват: ${Math.ceil(remaining / 3)} сек...`;
             statusDiv.className = 'status-bar ready';
             
             if (captureCount >= CAPTURE_THRESHOLD) {
-                // Захват!
                 const diameterPx = radius * 2;
+                
                 if (liveStep === 'step1') {
                     P1 = diameterPx;
-                    currentStep = 'step1_done';
                     liveStep = null;
+                    currentStep = 'step1_done';
+                    if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
+                    
                     statusDiv.textContent = '✅ Шаг 1 завершён! Нажмите «Далее».';
                     statusDiv.className = 'status-bar ready';
                     actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Далее →</button>`;
+                    drawStaticCircle(cx, cy, radius, color);
+                    return;
                 } else {
                     P2 = diameterPx;
-                    // Вычисляем F_px
                     F_px = (P1 * P2 * (D2_MM - D1_MM)) / (COIN_DIAMETER_MM * (P1 - P2));
                     localStorage.setItem('camera_F_px', F_px);
-                    currentStep = 'step2_done';
+                    
                     liveStep = null;
+                    currentStep = 'step2_done';
+                    if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
+                    
                     statusDiv.textContent = '✅ Калибровка завершена! Наведите на объект.';
                     statusDiv.className = 'status-bar ready';
                     actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять объект</button>`;
                     dot1.className = 'step-dot done'; dot2.className = 'step-dot done'; dot3.className = 'step-dot active';
+                    drawStaticCircle(cx, cy, radius, color);
+                    return;
                 }
-                if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
-                drawStaticCircle(cx, cy, radius, color);
-                return;
             }
         } else {
-            captureCount = Math.max(0, captureCount - 2); // плавный сброс
+            captureCount = Math.max(0, captureCount - 1);
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 4;
             ctx.setLineDash([8, 4]);
@@ -309,10 +332,10 @@
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 16px system-ui';
             ctx.textAlign = 'center';
-            ctx.fillText(liveStep === 'step1' ? 'Поднесите монету ближе' : 'Отведите монету дальше', cx, cy - radius - 16);
+            ctx.fillText(liveStep === 'step1' ? 'Поднесите монету' : 'Отведите монету', cx, cy - radius - 16);
             ctx.fillText(liveStep === 'step1' ? '~10 см от камеры' : '~20 см от камеры', cx, cy + radius + 28);
             
-            statusDiv.textContent = liveStep === 'step1' ? 'Ищем монету... Поднесите ближе.' : 'Ищем монету... Отведите дальше.';
+            statusDiv.textContent = liveStep === 'step1' ? 'Ищем монету...' : 'Ищем монету...';
             statusDiv.className = 'status-bar';
         }
         
@@ -320,7 +343,7 @@
     }
 
     function drawStaticCircle(cx, cy, r, color) {
-        ctx.putImageData(ctx.getImageData(0, 0, canvas.width, canvas.height), 0, 0);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, canvas.width, canvas.height);
@@ -335,7 +358,7 @@
         ctx.stroke();
     }
 
-    // ── СТОП-КАДР ОБЪЕКТА ──
+    // ── СТОП-КАДР ──
     function freezeFrame() {
         if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
         
@@ -518,6 +541,7 @@
         dragging = null;
         liveStep = null;
         P1 = null; P2 = null;
+        captureCount = 0;
         resultsDiv.classList.remove('visible');
         currentStep = 'idle';
         startCamera();
