@@ -418,368 +418,21 @@
             }
         }
         if (sx > frame.x && sx < frame.x + frame.w && sy > frame.y && sy < frame.y + frame.h) {
-                  .results .row span:last-child { font-weight: 600; color: #fff; font-size: 1rem; }
-        .results .tip { margin-top: 8px; font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; }
-    </style>
-</head>
-<body>
-
-<div class="viewfinder" id="viewfinder">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-</div>
-
-<div class="ui-overlay">
-    <div class="header">
-        <h1>Глаз прораба</h1>
-        <div class="sub">Двойная калибровка • Высшая точность</div>
-    </div>
-    <div class="step-indicator" id="stepDots">
-        <div class="step-dot active" id="dot1"></div>
-        <div class="step-dot" id="dot2"></div>
-        <div class="step-dot" id="dot3"></div>
-    </div>
-    <div class="lux-indicator" id="luxDisplay">-- lx</div>
-    <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
-    <div class="action-area" id="actionArea">
-        <button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button>
-    </div>
-    <div class="results" id="results">
-        <div class="row"><span>Ширина объекта:</span><span id="resWidth">—</span></div>
-        <div class="row"><span>Высота объекта:</span><span id="resHeight">—</span></div>
-        <div class="row"><span>Площадь:</span><span id="resArea">—</span></div>
-        <div class="row"><span>Освещённость:</span><span id="resLux">—</span></div>
-        <div class="row"><span>Ближайший RAL:</span><span id="resRAL">—</span></div>
-        <div class="tip" id="resTip"></div>
-    </div>
-</div>
-
-<script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const statusDiv = document.getElementById('status');
-    const actionArea = document.getElementById('actionArea');
-    const resultsDiv = document.getElementById('results');
-    const luxDisplay = document.getElementById('luxDisplay');
-    const dot1 = document.getElementById('dot1');
-    const dot2 = document.getElementById('dot2');
-    const dot3 = document.getElementById('dot3');
-
-    let stream, currentStep = 'idle', currentLux = null, ambientSensor = null;
-    let frozenImageData = null;
-    let coinDiameterPx1 = null; // размер монеты в пикселях на 1-м кадре (у стены)
-    let coinDiameterPx2 = null; // размер монеты в пикселях на 2-м кадре (приближена)
-    let scale = null;           // итоговый масштаб px/mm для стены
-    const COIN_DIAMETER_MM = 25;
-    
-    // Подэтапы: 'calib1' → 'calib2' → 'object' → 'done'
-    let framingSubStep = 'calib1';
-    
-    // Рамка объекта
-    let frame = null, dragging = null, dragStart = {}, frameStart = {};
-    // Рамка монеты
-    let coinFrame = null, coinDragMode = null, coinDragStart = {}, coinFrameStart = {};
-    const HANDLE_SIZE = 44;
-    
-    // Коэффициент увеличения второй рамки
-    const FRAME_RATIO = 1.8;
-
-    function handleAction() {
-        if (currentStep === 'idle') startCamera();
-        else if (currentStep === 'ready') freezeFrame();
-        else if (currentStep === 'framing') {
-            if (framingSubStep === 'calib1') confirmCalib1();
-            else if (framingSubStep === 'calib2') confirmCalib2();
-            else if (framingSubStep === 'object') finishMeasurement();
-        } else if (currentStep === 'done') resetAll();
-    }
-
-    async function startCamera() {
-        statusDiv.textContent = 'Запрашиваю камеру...';
-        const configs = [
-            { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
-            { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
-            { video: { facingMode: 'environment' } },
-            { video: true }
-        ];
-        for (let c of configs) {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia(c);
-                video.srcObject = stream;
-                await video.play();
-                canvas.width = video.videoWidth || canvas.clientWidth;
-                canvas.height = video.videoHeight || canvas.clientHeight;
-                statusDiv.textContent = 'Нажмите «Снять» для начала калибровки.';
-                statusDiv.className = 'status-bar ready';
-                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять кадр 1</button>`;
-                currentStep = 'ready';
-                dot1.className = 'step-dot'; dot2.className = 'step-dot'; dot3.className = 'step-dot';
-                startAmbientSensor();
-                return;
-            } catch (err) { if (err.name === 'NotAllowedError') break; }
-        }
-        statusDiv.textContent = 'Ошибка доступа к камере.';
-        statusDiv.className = 'status-bar error';
-        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Попробовать снова</button>`;
-    }
-
-    function startAmbientSensor() {
-        if ('AmbientLightSensor' in window) {
-            try {
-                ambientSensor = new AmbientLightSensor();
-                ambientSensor.onreading = () => { currentLux = Math.round(ambientSensor.illuminance); luxDisplay.textContent = currentLux + ' lx'; };
-                ambientSensor.onerror = () => { luxDisplay.textContent = '-- lx'; };
-                ambientSensor.start();
-            } catch (e) { luxDisplay.textContent = '-- lx'; }
-        } else { luxDisplay.textContent = '-- lx'; }
-    }
-
-    // ── ЗАХВАТ КАДРА ──
-    function freezeFrame() {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
-        const coinR = canvas.width * 0.06;
-        coinFrame = { cx: canvas.width / 2, cy: canvas.height / 2, r: coinR };
-        coinDiameterPx1 = null;
-        coinDiameterPx2 = null;
-        scale = null;
-        
-        const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
-        frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
-        
-        currentStep = 'framing';
-        framingSubStep = 'calib1';
-        updateUIForSubStep();
-        
-        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-        canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-        canvas.addEventListener('touchend', onTouchEnd);
-        drawFrozenScene();
-    }
-
-    function updateUIForSubStep() {
-        dot1.className = 'step-dot' + (framingSubStep === 'calib1' ? ' active' : (coinDiameterPx1 ? ' done' : ''));
-        dot2.className = 'step-dot' + (framingSubStep === 'calib2' ? ' active' : (coinDiameterPx2 ? ' done' : ''));
-        dot3.className = 'step-dot' + (framingSubStep === 'object' ? ' active' : '');
-        
-        if (framingSubStep === 'calib1') {
-            statusDiv.textContent = '🔴 Шаг 1/3: Обведите монету у стены (малая рамка).';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">✓ Готово</button>`;
-        } else if (framingSubStep === 'calib2') {
-            statusDiv.textContent = '🟡 Шаг 2/3: Приблизьте монету к камере и обведите (большая рамка).';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">✓ Готово</button>`;
-        } else if (framingSubStep === 'object') {
-            statusDiv.textContent = '🔵 Шаг 3/3: Растяните синюю рамку по объекту.';
-            statusDiv.className = 'status-bar ready';
-            actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">✓ Измерить</button>`;
-        }
-    }
-
-    function confirmCalib1() {
-        if (!coinFrame || coinFrame.r < 5) return;
-        coinDiameterPx1 = coinFrame.r * 2;
-        // Подготавливаем вторую рамку (больше в FRAME_RATIO раз)
-        const newR = coinFrame.r * FRAME_RATIO;
-        coinFrame.r = Math.min(newR, canvas.width * 0.35);
-        framingSubStep = 'calib2';
-        updateUIForSubStep();
-        drawFrozenScene();
-    }
-
-    function confirmCalib2() {
-        if (!coinFrame || coinFrame.r < 5) return;
-        coinDiameterPx2 = coinFrame.r * 2;
-        
-        // Проверяем соотношение
-        const ratio = coinDiameterPx2 / coinDiameterPx1;
-        const expectedRatio = FRAME_RATIO;
-        const tolerance = 0.2;
-        
-        if (Math.abs(ratio - expectedRatio) > tolerance) {
-            statusDiv.textContent = '⚠️ Монета не в плоскости стены. Начните заново.';
-            statusDiv.className = 'status-bar error';
-            return;
-        }
-        
-        // Масштаб для плоскости стены
-        scale = coinDiameterPx1 / COIN_DIAMETER_MM;
-        framingSubStep = 'object';
-        updateUIForSubStep();
-        drawFrozenScene();
-    }
-
-    // ── ОТРИСОВКА ──
-    function drawFrozenScene() {
-        if (!frozenImageData) return;
-        ctx.putImageData(frozenImageData, 0, 0);
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        if ((framingSubStep === 'calib1' || framingSubStep === 'calib2') && coinFrame) {
-            // Вырезаем круг монеты
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(coinFrame.cx, coinFrame.cy, coinFrame.r, 0, Math.PI * 2);
-            ctx.clip();
-            ctx.putImageData(frozenImageData, 0, 0);
-            ctx.restore();
-            
-            // Цвет рамки зависит от этапа
-            const color = framingSubStep === 'calib1' ? '#ff4444' : '#ffaa00';
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.arc(coinFrame.cx, coinFrame.cy, coinFrame.r, 0, Math.PI * 2);
-            ctx.stroke();
-            
-            // Маркер
-            const mx = coinFrame.cx + coinFrame.r;
-            const my = coinFrame.cy;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(mx, my, 16, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-            
-            // Подпись
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 18px system-ui';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = '#000';
-            ctx.shadowBlur = 6;
-            ctx.fillText(framingSubStep === 'calib1' ? 'Монета у стены' : 'Монета ближе', coinFrame.cx, coinFrame.cy - coinFrame.r - 14);
-            ctx.shadowBlur = 0;
-        }
-        
-        if (framingSubStep === 'object' && frame) {
-            const { x, y, w, h } = frame;
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(x, y, w, h);
-            ctx.clip();
-            ctx.putImageData(frozenImageData, 0, 0);
-            ctx.restore();
-            
-            ctx.strokeStyle = '#2a6df4';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(x, y, w, h);
-            
-            [[x, y], [x+w, y], [x, y+h], [x+w, y+h]].forEach(([cx, cy]) => {
-                ctx.fillStyle = '#2a6df4';
-                ctx.beginPath();
-                ctx.arc(cx, cy, HANDLE_SIZE/2, 0, Math.PI*2);
-                ctx.fill();
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-            });
-            
-            if (scale) {
-                const wCm = (w / scale / 10).toFixed(1);
-                const hCm = (h / scale / 10).toFixed(1);
-                const areaM2 = ((w / scale / 1000) * (h / scale / 1000)).toFixed(3);
-                
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 26px system-ui';
-                ctx.textAlign = 'center';
-                ctx.shadowColor = 'rgba(0,0,0,0.9)';
-                ctx.shadowBlur = 10;
-                ctx.fillText(`${wCm} см`, x + w/2, y - 16);
-                ctx.save();
-                ctx.translate(x - 28, y + h/2);
-                ctx.rotate(-Math.PI/2);
-                ctx.fillText(`${hCm} см`, 0, 0);
-                ctx.restore();
-                
-                const areaText = `${areaM2} м²`;
-                const tw = ctx.measureText(areaText).width + 24;
-                ctx.fillStyle = 'rgba(0,0,0,0.85)';
-                ctx.fillRect(x + w/2 - tw/2, y + h/2 - 16, tw, 32);
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 22px system-ui';
-                ctx.fillText(areaText, x + w/2, y + h/2 + 8);
-                ctx.shadowBlur = 0;
-            }
-        }
-    }
-
-    // ── TOUCH ──
-    function onTouchStart(e) {
-        if (currentStep !== 'framing') return;
-        e.preventDefault(); e.stopPropagation();
-        const touch = e.touches[0];
-        const rect = canvas.getBoundingClientRect();
-        const sx = (touch.clientX - rect.left) * (canvas.width / rect.width);
-        const sy = (touch.clientY - rect.top) * (canvas.height / rect.height);
-        
-        if ((framingSubStep === 'calib1' || framingSubStep === 'calib2') && coinFrame) {
-            const distToCenter = Math.hypot(sx - coinFrame.cx, sy - coinFrame.cy);
-            const distToMarker = Math.hypot(sx - (coinFrame.cx + coinFrame.r), sy - coinFrame.cy);
-            if (distToMarker < 30) {
-                coinDragMode = 'resize';
-                coinDragStart = { x: sx, y: sy };
-                coinFrameStart = { ...coinFrame };
-                return;
-            }
-            if (distToCenter < coinFrame.r + 20) {
-                coinDragMode = 'move';
-                coinDragStart = { x: sx, y: sy };
-                coinFrameStart = { ...coinFrame };
-                return;
-            }
-        }
-        
-        if (framingSubStep === 'object' && frame) {
-            const hs = HANDLE_SIZE;
-            const handles = [
-                { cx: frame.x, cy: frame.y, id: 'frame_tl' },
-                { cx: frame.x + frame.w, cy: frame.y, id: 'frame_tr' },
-                { cx: frame.x, cy: frame.y + frame.h, id: 'frame_bl' },
-                { cx: frame.x + frame.w, cy: frame.y + frame.h, id: 'frame_br' }
-            ];
-            for (let h of handles) {
-                if (Math.hypot(sx - h.cx, sy - h.cy) < hs * 1.3) {
-                    dragging = h.id;
-                    dragStart = { x: sx, y: sy };
-                    frameStart = { ...frame };
-                    return;
-                }
-            }
-            if (sx > frame.x && sx < frame.x + frame.w && sy > frame.y && sy < frame.y + frame.h) {
-                dragging = 'frame_move';
-                dragStart = { x: sx, y: sy };
-                frameStart = { ...frame };
-            }
+            dragging = 'frame_move';
+            dragStart = { x: sx, y: sy };
+            frameStart = { ...frame };
         }
     }
 
     function onTouchMove(e) {
-        if (!dragging && !coinDragMode) return;
+        if (!dragging || !frame) return;
         e.preventDefault(); e.stopPropagation();
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
         const cx = (touch.clientX - rect.left) * (canvas.width / rect.width);
         const cy = (touch.clientY - rect.top) * (canvas.height / rect.height);
-        
-        if (coinDragMode && coinFrame) {
-            if (coinDragMode === 'move') {
-                const dx = cx - coinDragStart.x, dy = cy - coinDragStart.y;
-                coinFrame.cx = Math.max(coinFrame.r, Math.min(canvas.width - coinFrame.r, coinFrameStart.cx + dx));
-                coinFrame.cy = Math.max(coinFrame.r, Math.min(canvas.height - coinFrame.r, coinFrameStart.cy + dy));
-            } else if (coinDragMode === 'resize') {
-                const delta = (cx - coinDragStart.x + cy - coinDragStart.y) / 2;
-                coinFrame.r = Math.max(5, Math.min(canvas.width * 0.35, coinFrameStart.r + delta));
-            }
-            drawFrozenScene();
-            return;
-        }
-        
-        if (!dragging || !frame) return;
         const dx = cx - dragStart.x, dy = cy - dragStart.y, MIN = 40;
+        
         if (dragging === 'frame_move') {
             frame.x = Math.max(0, Math.min(canvas.width - frame.w, frameStart.x + dx));
             frame.y = Math.max(0, Math.min(canvas.height - frame.h, frameStart.y + dy));
@@ -803,20 +456,22 @@
         drawFrozenScene();
     }
 
-    function onTouchEnd(e) {
-        dragging = null;
-        coinDragMode = null;
+    function onTouchEnd(e) { dragging = null; }
+
+    function resetFrame() {
+        const fw = canvas.width * 0.6, fh = canvas.height * 0.5;
+        frame = { x: (canvas.width - fw) / 2, y: (canvas.height - fh) / 2, w: fw, h: fh };
+        drawFrozenScene();
     }
 
     // ── ФИНАЛ ──
     function finishMeasurement() {
-        if (!scale) return;
         canvas.removeEventListener('touchstart', onTouchStart);
         canvas.removeEventListener('touchmove', onTouchMove);
         canvas.removeEventListener('touchend', onTouchEnd);
         
-        const widthM = (frame.w / scale / 1000);
-        const heightM = (frame.h / scale / 1000);
+        const widthM = (frame.w / F_px * 25 / 1000);
+        const heightM = (frame.h / F_px * 25 / 1000);
         const area = widthM * heightM;
         
         document.getElementById('resWidth').textContent = widthM.toFixed(2) + ' м (' + (widthM*100).toFixed(1) + ' см)';
@@ -828,9 +483,7 @@
         
         resultsDiv.classList.add('visible');
         currentStep = 'done';
-        dot1.className = 'step-dot done';
-        dot2.className = 'step-dot done';
-        dot3.className = 'step-dot done';
+        dot1.className = 'step-dot done'; dot2.className = 'step-dot done'; dot3.className = 'step-dot done';
         statusDiv.textContent = '✅ Измерение выполнено!';
         statusDiv.className = 'status-bar';
         actionArea.innerHTML = `<button class="btn secondary" id="actionBtn" onclick="handleAction()">Новое измерение</button>`;
@@ -838,27 +491,24 @@
     }
 
     function resetAll() {
+        if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
         canvas.removeEventListener('touchstart', onTouchStart);
         canvas.removeEventListener('touchmove', onTouchMove);
         canvas.removeEventListener('touchend', onTouchEnd);
         frozenImageData = null;
-        coinDiameterPx1 = null; coinDiameterPx2 = null; scale = null;
-        coinFrame = null; frame = null;
-        dragging = null; coinDragMode = null;
+        frame = null;
+        dragging = null;
+        liveStep = null;
+        P1 = null; P2 = null;
         resultsDiv.classList.remove('visible');
-        currentStep = 'ready';
-        framingSubStep = 'calib1';
-        dot1.className = 'step-dot'; dot2.className = 'step-dot'; dot3.className = 'step-dot';
-        statusDiv.textContent = 'Нажмите «Снять» для начала калибровки.';
-        statusDiv.className = 'status-bar ready';
-        actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять кадр 1</button>`;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (video.paused) video.play();
+        currentStep = 'idle';
+        startCamera();
     }
 
     window.addEventListener('beforeunload', () => {
         if (stream) stream.getTracks().forEach(t => t.stop());
         if (ambientSensor) ambientSensor.stop();
+        if (liveFrameId) cancelAnimationFrame(liveFrameId);
     });
     document.addEventListener('dblclick', () => {
         if (document.fullscreenElement) document.exitFullscreen();
