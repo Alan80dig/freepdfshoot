@@ -86,30 +86,109 @@
     const D1_MM = 100; // 10 см
     const D2_MM = 200; // 20 см
     
-    // Калибровка
-    let liveFrameId = null;
-    let leftCaptured = false;
-    let rightCaptured = false;
-    let captureCountLeft = 0;
-    let captureCountRight = 0;
-    const CAPTURE_THRESHOLD = 15;
-    let P1 = null, P2 = null;
+    // ── ПЕРЕМЕННЫЕ КАЛИБРОВКИ ──
+let calibrationState = 'idle'; // 'idle' | 'step1_near' | 'step2_far' | 'done'
+let liveFrameId = null;
+let captureTimer = 0;
+const CAPTURE_THRESHOLD = 20;
+let P1_px = null, P2_px = null;
+let currentCircleColor = '#ff4444';
+let currentCircleRadius = 1;
+let currentCircleLabel = '';
+
+// ── ЗАПУСК КАЛИБРОВКИ ──
+function startLiveCalibration() {
+    if (liveFrameId) cancelAnimationFrame(liveFrameId);
     
-    // Стоп-кадр
-    let frozenImageData = null;
-    let frame = null, dragging = null, dragStart = {}, frameStart = {};
-    const HANDLE_SIZE = 44;
+    currentStep = 'calibrating';
+    calibrationState = 'step1_near';
+    captureTimer = 0;
+    P1_px = null; P2_px = null;
+    
+    // Начальные параметры круга
+    currentCircleRadius = canvas.width * 0.22; // Большой для 10 см
+    currentCircleColor = '#ff4444';
+    currentCircleLabel = '~10 см';
+    
+    statusDiv.textContent = '🔴 Поднесите монету на 10 см к камере';
+    statusDiv.className = 'status-bar';
+    actionArea.innerHTML = ''; // убираем кнопки, всё по таймингу
+    dot1.className = 'step-dot active'; 
+    dot2.className = 'step-dot';
+    
+    liveLoop();
+}
 
-    function handleAction() {
-        switch (currentStep) {
-            case 'idle': startCamera(); break;
-            case 'ready': startLiveCalibration(); break;
-            case 'calibrated': freezeFrame(); break;
-            case 'measuring': finishMeasurement(); break;
-            case 'done': resetAll(); break;
+// ── ЦИКЛ ЖИВОЙ КАЛИБРОВКИ ──
+function liveLoop() {
+    if (currentStep !== 'calibrating') return;
+    
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h / 2;
+    const r = currentCircleRadius;
+    
+    // Проверяем, заполнила ли монета круг
+    const coinFills = checkCoinInCircle(imageData, w, h, cx, cy, r);
+    
+    // Затемнение фона
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2, true);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fill();
+    ctx.restore();
+    
+    // Логика захвата и отрисовки круга
+    if (coinFills) {
+        captureTimer++;
+        drawProgressCircle(cx, cy, r, currentCircleColor, captureTimer / CAPTURE_THRESHOLD, currentCircleLabel);
+        
+        if (captureTimer >= CAPTURE_THRESHOLD) {
+            // Захват завершён
+            if (calibrationState === 'step1_near') {
+                P1_px = r * 2;
+                // Переход ко второму кругу
+                calibrationState = 'step2_far';
+                captureTimer = 0;
+                currentCircleRadius = r / 2; // Меньше в 2 раза
+                currentCircleColor = '#ff8800';
+                currentCircleLabel = '~20 см';
+                
+                statusDiv.textContent = '🟠 Отведите монету на 20 см';
+                dot1.className = 'step-dot done'; 
+                dot2.className = 'step-dot active';
+                
+                // Небольшая пауза, чтобы пользователь сориентировался
+                setTimeout(() => {
+                    if (currentStep === 'calibrating') liveLoop();
+                }, 800);
+                return;
+                
+            } else if (calibrationState === 'step2_far') {
+                P2_px = r * 2;
+                // Калибровка завершена!
+                F_px = (P1_px * P2_px * (200 - 100)) / (25 * (P1_px - P2_px));
+                localStorage.setItem('camera_F_px', F_px);
+                
+                if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
+                currentStep = 'calibrated';
+                
+                statusDiv.textContent = '✅ Калибровка завершена! Наведите на объект.';
+                statusDiv.className = 'status-bar ready';
+                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять объект</button>`;
+                return;
+            }
         }
+    } else {
+        captureTimer = Math.max(0, captureTimer - 1);
+        drawEmptyCircle(cx, cy, r, currentCircleColor, currentCircleLabel);
     }
-
+    
+    liveFrameId = requestAnimationFrame(liveLoop);
+}
     async function startCamera() {
         statusDiv.textContent = 'Запрашиваю камеру...';
         const configs = [
