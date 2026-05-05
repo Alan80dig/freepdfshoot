@@ -238,23 +238,109 @@
         ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
         ctx.fillStyle = 'rgba(0,0,0,0.45)';
         ctx.fill();
+
+    // ── ЖИВАЯ КАЛИБРОВКА: ШАГ 1 (10 см) ──
+    function startLiveCalibration() {
+        currentStep = 'calibrating';
+        liveStep = 'step1';
+        captureCount = 0;
+        P1 = null;
+        P2 = null;
+        
+        statusDiv.textContent = '🔴 Шаг 1/3: Поднесите монету близко к камере (~10 см).';
+        statusDiv.className = 'status-bar';
+        actionArea.innerHTML = ``;
+        dot1.className = 'step-dot active'; dot2.className = 'step-dot'; dot3.className = 'step-dot';
+        
+        liveLoop();
+    }
+
+    function startLiveStep2() {
+        liveStep = 'step2';
+        captureCount = 0;
+        
+        statusDiv.textContent = '🟠 Шаг 2/3: Отведите монету дальше (~20 см).';
+        dot1.className = 'step-dot done'; dot2.className = 'step-dot active'; dot3.className = 'step-dot';
+        
+        liveLoop();
+    }
+
+    function liveLoop() {
+        if (currentStep !== 'calibrating') return;
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Размер круга: шаг 1 = большой (10 см), шаг 2 = в 2 раза меньше (20 см)
+        const baseRadius = canvas.width * 0.22;
+        const radius = liveStep === 'step1' ? baseRadius : baseRadius / 2;
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const color = liveStep === 'step1' ? '#ff4444' : '#ff8800';
+        
+        // УЛУЧШЕННЫЙ ДЕТЕКТ: проверяем однородность внутри круга
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let innerSum = 0, innerCount = 0;
+        let innerValues = [];
+        
+        for (let y = 0; y < canvas.height; y += 3) {
+            for (let x = 0; x < canvas.width; x += 3) {
+                const dist = Math.hypot(x - cx, y - cy);
+                if (dist < radius * 0.75) {
+                    const idx = (y * canvas.width + x) * 4;
+                    const bright = (imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2]) / 3;
+                    innerSum += bright;
+                    innerValues.push(bright);
+                    innerCount++;
+                }
+            }
+        }
+        
+        const innerBright = innerSum / Math.max(innerCount, 1);
+        
+        // Вычисляем дисперсию (однородность)
+        let variance = 0;
+        for (let v of innerValues) {
+            variance += (v - innerBright) ** 2;
+        }
+        variance /= Math.max(innerValues.length, 1);
+        const stdDev = Math.sqrt(variance);
+        
+        // Монета: яркая И однородная (низкая дисперсия)
+        const coinFills = innerBright > 100 && stdDev < 40;
+        
+        // Затемнение вне круга
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fill();
         ctx.restore();
         
         // Круг
         if (coinFills) {
             captureCount++;
-            const progress = captureCount / CAPTURE_THRESHOLD;
+            const progress = Math.min(captureCount / CAPTURE_THRESHOLD, 1);
+            
+            // Полный круг с прогресс-дугой
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+            
+            // Прогресс-дуга
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
             ctx.strokeStyle = color;
             ctx.lineWidth = 5;
             ctx.shadowColor = color;
             ctx.shadowBlur = 16;
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius, 0, Math.PI * 2 * progress);
             ctx.stroke();
             ctx.shadowBlur = 0;
             
             const remaining = CAPTURE_THRESHOLD - captureCount;
-            statusDiv.textContent = `Захват через ${Math.ceil(remaining / 3)}...`;
+            statusDiv.textContent = `Захват: ${Math.ceil(remaining / 3)} сек...`;
             statusDiv.className = 'status-bar ready';
             
             if (captureCount >= CAPTURE_THRESHOLD) {
@@ -263,7 +349,9 @@
                 if (liveStep === 'step1') {
                     P1 = diameterPx;
                     currentStep = 'step1_done';
+                    liveStep = null;
                     statusDiv.textContent = '✅ Шаг 1 завершён! Нажмите «Далее».';
+                    statusDiv.className = 'status-bar ready';
                     actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">Далее →</button>`;
                 } else {
                     P2 = diameterPx;
@@ -271,18 +359,18 @@
                     F_px = (P1 * P2 * (D2_MM - D1_MM)) / (COIN_DIAMETER_MM * (P1 - P2));
                     localStorage.setItem('camera_F_px', F_px);
                     currentStep = 'step2_done';
+                    liveStep = null;
                     statusDiv.textContent = '✅ Калибровка завершена! Наведите на объект.';
                     statusDiv.className = 'status-bar ready';
                     actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять объект</button>`;
                     dot1.className = 'step-dot done'; dot2.className = 'step-dot done'; dot3.className = 'step-dot active';
                 }
-                liveStep = null;
                 if (liveFrameId) { cancelAnimationFrame(liveFrameId); liveFrameId = null; }
                 drawStaticCircle(cx, cy, radius, color);
                 return;
             }
         } else {
-            captureCount = 0;
+            captureCount = Math.max(0, captureCount - 2); // плавный сброс
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 4;
             ctx.setLineDash([8, 4]);
@@ -294,8 +382,11 @@
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 16px system-ui';
             ctx.textAlign = 'center';
-            ctx.fillText(liveStep === 'step1' ? 'Поднесите монету' : 'Отведите монету', cx, cy - radius - 16);
+            ctx.fillText(liveStep === 'step1' ? 'Поднесите монету ближе' : 'Отведите монету дальше', cx, cy - radius - 16);
             ctx.fillText(liveStep === 'step1' ? '~10 см от камеры' : '~20 см от камеры', cx, cy + radius + 28);
+            
+            statusDiv.textContent = liveStep === 'step1' ? 'Ищем монету... Поднесите ближе.' : 'Ищем монету... Отведите дальше.';
+            statusDiv.className = 'status-bar';
         }
         
         liveFrameId = requestAnimationFrame(liveLoop);
@@ -316,6 +407,8 @@
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.stroke();
     }
+    
+    
 
     // ── СТОП-КАДР ОБЪЕКТА ──
     function freezeFrame() {
