@@ -167,13 +167,14 @@
         coinDiameterPx = null;
         
         // 4 угла объекта по краям
-        const m = 60;
-        corners = [
-            { x: m, y: m },                          // TL
-            { x: canvas.width - m, y: m },           // TR
-            { x: canvas.width - m, y: canvas.height - m }, // BR
-            { x: m, y: canvas.height - m }           // BL
-        ];
+        const marginX = canvas.width * 0.2;
+    const marginY = canvas.height * 0.2;
+    corners = [
+        { x: marginX, y: marginY },
+        { x: canvas.width - marginX, y: marginY },
+        { x: canvas.width - marginX, y: canvas.height - marginY },
+        { x: marginX, y: canvas.height - marginY }
+    ];
         
         currentStep = 'framing';
         framingSubStep = 'coin';
@@ -428,26 +429,29 @@
         const sx = (touch.clientX - rect.left) * (canvas.width / rect.width);
         const sy = (touch.clientY - rect.top) * (canvas.height / rect.height);
         
+        // Режим монеты
         if (framingSubStep === 'coin' && coinFrame) {
             const distToMarker = Math.hypot(sx - (coinFrame.cx + coinFrame.r), sy - coinFrame.cy);
-            if (distToMarker < 30) {
+            if (distToMarker < 35) {
                 draggingCoin = true;
-                coinDragStart = { x: sx, y: sy };
+                coinDragStart = { x: sx, y: sy, mode: 'resize' };
                 coinFrameStart = { ...coinFrame };
                 return;
             }
             const distToCenter = Math.hypot(sx - coinFrame.cx, sy - coinFrame.cy);
-            if (distToCenter < coinFrame.r + 20) {
+            if (distToCenter < coinFrame.r + 25) {
                 draggingCoin = true;
-                coinDragStart = { x: sx, y: sy };
+                coinDragStart = { x: sx, y: sy, mode: 'move' };
                 coinFrameStart = { ...coinFrame };
-                coinDragStart.mode = 'move';
+                return;
             }
         }
         
+        // Режим углов — УВЕЛИЧЕННАЯ ЗОНА ЗАХВАТА
         if (framingSubStep === 'corners' && corners) {
+            const GRAB_RADIUS = 50; // было HANDLE_SIZE (40), стало больше
             for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE) {
+                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < GRAB_RADIUS) {
                     draggingCorner = i;
                     cornerDragStart = { x: sx, y: sy };
                     return;
