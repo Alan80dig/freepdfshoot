@@ -65,18 +65,13 @@
     let draggingCorner = -1;
     const HANDLE_SIZE = 44;
 
-    // Лупа
+    // Лупа и live-zoom
     let lensActive = false, lensX = 0, lensY = 0;
     const LENS_RADIUS = 100;
     let lensMode = 'full';
     let longPressTimer = null, longPressTriggered = false;
-
-    // Live Zoom
     let liveZoom = 1;
-    let livePanX = 0, livePanY = 0;
     let lastPinchDist = 0;
-
-    // Ч/Б режим
     let bwMode = false;
 
     function handleAction() {
@@ -103,10 +98,7 @@
                 canvas.height = video.videoHeight || canvas.clientHeight;
                 statusDiv.textContent = 'Наведите камеру. Pinch-to-zoom.';
                 statusDiv.className = 'status-bar ready';
-                actionArea.innerHTML = `
-                    <button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button>
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
-                `;
+                updateLiveButtons();
                 currentStep = 'ready'; updatePageCounter();
                 startLiveView();
                 return;
@@ -118,6 +110,7 @@
 
     function toggleBW() { bwMode = !bwMode; updateLiveButtons(); }
     function updateLiveButtons() {
+        if (currentStep !== 'ready') return;
         actionArea.innerHTML = `
             <button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button>
             <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
@@ -131,15 +124,14 @@
             ctx.save();
             ctx.translate(canvas.width/2, canvas.height/2);
             ctx.scale(liveZoom, liveZoom);
-            ctx.translate(-canvas.width/2 + livePanX, -canvas.height/2 + livePanY);
+            ctx.translate(-canvas.width/2, -canvas.height/2);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             ctx.restore();
             if (bwMode) {
                 const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imgData.data;
-                for (let i = 0; i < data.length; i += 4) {
-                    const gray = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-                    data[i] = data[i+1] = data[i+2] = gray;
+                for (let i = 0; i < imgData.data.length; i += 4) {
+                    const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
+                    imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
                 }
                 ctx.putImageData(imgData, 0, 0);
             }
@@ -151,24 +143,16 @@
         canvas.addEventListener('touchend', onLiveTouchEnd);
     }
 
-    function onLiveTouchStart(e) {
-        if (e.touches.length === 2) {
-            lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        }
-    }
+    function onLiveTouchStart(e) { if(e.touches.length===2) lastPinchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); }
     function onLiveTouchMove(e) {
-        if (e.touches.length === 2) {
+        if(e.touches.length===2) {
             e.preventDefault();
-            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-            if (lastPinchDist) {
-                const scale = dist / lastPinchDist;
-                liveZoom = Math.max(1, Math.min(5, liveZoom * scale));
-                lastPinchDist = dist;
-            }
+            const dist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+            if(lastPinchDist) liveZoom = Math.max(1, Math.min(5, liveZoom * (dist / lastPinchDist)));
             lastPinchDist = dist;
         }
     }
-    function onLiveTouchEnd(e) { if (e.touches.length < 2) lastPinchDist = 0; }
+    function onLiveTouchEnd(e) { if(e.touches.length<2) lastPinchDist=0; }
 
     function freezeFrame() {
         canvas.removeEventListener('touchstart', onLiveTouchStart);
@@ -177,15 +161,14 @@
         ctx.save();
         ctx.translate(canvas.width/2, canvas.height/2);
         ctx.scale(liveZoom, liveZoom);
-        ctx.translate(-canvas.width/2 + livePanX, -canvas.height/2 + livePanY);
+        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.restore();
         if (bwMode) {
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imgData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                const gray = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-                data[i] = data[i+1] = data[i+2] = gray;
+            for (let i = 0; i < imgData.data.length; i += 4) {
+                const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
+                imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
             }
             ctx.putImageData(imgData, 0, 0);
         }
@@ -198,7 +181,7 @@
         lensActive = false; lensMode = 'full'; longPressTriggered = false; draggingCorner = -1;
         if (longPressTimer) clearTimeout(longPressTimer);
         currentStep = 'framing';
-        statusDiv.textContent = '📐 Расставьте маркеры. Двойной тап — лупа.';
+        statusDiv.textContent = '📐 Расставьте маркеры. Цвет рамки = качество.';
         statusDiv.className = 'status-bar ready';
         actionArea.innerHTML = `
             <button class="btn secondary" onclick="resetCorners()">↺ Сброс</button>
@@ -218,22 +201,50 @@
         if (btn) btn.textContent = lensMode === 'full' ? '🔍 Фрагмент' : '📄 Весь документ';
     }
 
+    function getCornersQuality(corners) {
+        let perfectAngles = 0, goodAngles = 0, badAngles = 0;
+        for (let i = 0; i < 4; i++) {
+            const prev = corners[(i+3)%4], curr = corners[i], next = corners[(i+1)%4];
+            const v1 = { x: prev.x - curr.x, y: prev.y - curr.y };
+            const v2 = { x: next.x - curr.x, y: next.y - curr.y };
+            const dot = v1.x*v2.x + v1.y*v2.y;
+            const cross = v1.x*v2.y - v1.y*v2.x;
+            const angle = Math.abs(Math.atan2(cross, dot) * 180 / Math.PI);
+            if (angle > 88 && angle < 92) perfectAngles++;
+            else if (angle > 80 && angle < 100) goodAngles++;
+            else badAngles++;
+        }
+        if (perfectAngles === 4) return 'perfect';
+        if (badAngles > 0) return 'bad';
+        if (goodAngles >= 2) return 'good';
+        return 'neutral';
+    }
+
     function drawFrozenScene() {
         if (!frozenImageData) return;
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         if (!corners) return;
+
+        const quality = getCornersQuality(corners);
+        let color, statusText;
+        if (quality === 'perfect') { color = '#00ff88'; statusText = '✅ Идеальный ракурс'; }
+        else if (quality === 'good') { color = '#ffdd57'; statusText = '⚠️ Почти ровно'; }
+        else if (quality === 'bad') { color = '#ff4444'; statusText = '❌ Сильное искажение'; }
+        else { color = '#2a6df4'; statusText = '📐 Расставьте маркеры'; }
+        statusDiv.textContent = statusText;
+
         if (lensMode === 'full') {
             const [TL, TR, BR, BL] = corners;
             ctx.save(); ctx.beginPath();
             ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
             ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y); ctx.closePath();
             ctx.clip(); ctx.putImageData(frozenImageData, 0, 0); ctx.restore();
-            ctx.strokeStyle = '#2a6df4'; ctx.lineWidth = 3;
+            ctx.strokeStyle = color; ctx.lineWidth = 3;
             ctx.beginPath(); ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
             ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y); ctx.closePath(); ctx.stroke();
             corners.forEach((c, i) => {
-                ctx.fillStyle = '#2a6df4'; ctx.beginPath(); ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = color; ctx.beginPath(); ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
                 ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(i+1, c.x, c.y+5);
             });
@@ -365,38 +376,8 @@
         return bwMode ? toGray(tmp) : enhanceContrast(tmp);
     }
 
-    function toGray(cvs) {
-        const ctx=cvs.getContext('2d'), data=ctx.getImageData(0,0,cvs.width,cvs.height).data;
-        for (let i=0;i<data.length;i+=4) {
-            const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
-            data[i]=data[i+1]=data[i+2]=gray;
-        }
-        ctx.putImageData(new ImageData(data,cvs.width,cvs.height),0,0);
-        return cvs;
-    }
-
-    function enhanceContrast(cvs) {
-        const ctx=cvs.getContext('2d'), data=ctx.getImageData(0,0,cvs.width,cvs.height).data;
-        let min=255,max=0;
-        for (let i=0;i<data.length;i+=4) {
-            if (data[i]===0&&data[i+1]===0&&data[i+2]===0) continue;
-            const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
-            if (gray<min) min=gray; if (gray>max) max=gray;
-        }
-        if (max<=min) return cvs;
-        const range=max-min;
-        for (let i=0;i<data.length;i+=4) {
-            if (data[i]===0&&data[i+1]===0&&data[i+2]===0) continue;
-            const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
-            const factor=(gray-min)/range;
-            const newGray=factor*255;
-            const ratio=gray>1?newGray/gray:1;
-            data[i]=Math.min(255,data[i]*ratio); data[i+1]=Math.min(255,data[i+1]*ratio); data[i+2]=Math.min(255,data[i+2]*ratio);
-        }
-        ctx.putImageData(new ImageData(data,cvs.width,cvs.height),0,0);
-        return cvs;
-    }
-
+    function toGray(cvs) { const ctx=cvs.getContext('2d'), data=ctx.getImageData(0,0,cvs.width,cvs.height).data; for (let i=0;i<data.length;i+=4) { const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114; data[i]=data[i+1]=data[i+2]=gray; } ctx.putImageData(new ImageData(data,cvs.width,cvs.height),0,0); return cvs; }
+    function enhanceContrast(cvs) { const ctx=cvs.getContext('2d'), data=ctx.getImageData(0,0,cvs.width,cvs.height).data; let min=255,max=0; for (let i=0;i<data.length;i+=4) { if (data[i]===0&&data[i+1]===0&&data[i+2]===0) continue; const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114; if (gray<min) min=gray; if (gray>max) max=gray; } if (max<=min) return cvs; const range=max-min; for (let i=0;i<data.length;i+=4) { if (data[i]===0&&data[i+1]===0&&data[i+2]===0) continue; const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114; const factor=(gray-min)/range; const newGray=factor*255; const ratio=gray>1?newGray/gray:1; data[i]=Math.min(255,data[i]*ratio); data[i+1]=Math.min(255,data[i+1]*ratio); data[i+2]=Math.min(255,data[i+2]*ratio); } ctx.putImageData(new ImageData(data,cvs.width,cvs.height),0,0); return cvs; }
     function computeHomography(src,dst){const A=[],b=[];for(let i=0;i<4;i++){A.push([src[i].x,src[i].y,1,0,0,0,-dst[i].x*src[i].x,-dst[i].x*src[i].y]);b.push(dst[i].x);A.push([0,0,0,src[i].x,src[i].y,1,-dst[i].y*src[i].x,-dst[i].y*src[i].y]);b.push(dst[i].y);}const n=8,aug=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(aug[r][c])>Math.abs(aug[mr][c]))mr=r;[aug[c],aug[mr]]=[aug[mr],aug[c]];if(Math.abs(aug[c][c])<1e-12)return null;for(let j=c;j<=n;j++)aug[c][j]/=aug[c][c];for(let r=0;r<n;r++){if(r===c)continue;const f=aug[r][c];for(let j=c;j<=n;j++)aug[r][j]-=f*aug[c][j];}}const h=aug.map(r=>r[8]);return[h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];}
     function invertHomography(H){const[a,b,c,d,e,f,g,h,i]=H,det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-12)return null;const id=1/det;return[(e*i-f*h)*id,(c*h-b*i)*id,(b*f-c*e)*id,(f*g-d*i)*id,(a*i-c*g)*id,(c*d-a*f)*id,(d*h-e*g)*id,(b*g-a*h)*id,(a*e-b*d)*id];}
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
