@@ -64,7 +64,7 @@
     const progressText = document.getElementById('progressText');
     const progressFill = document.getElementById('progressFill');
 
-    let currentStep = 'idle';
+    let currentStep = 'ready';
     let savedPages = [];
     let frozenImageData = null;
     let corners = null;
@@ -76,7 +76,6 @@
     function handleAction() {
         if (currentStep === 'saving' || currentStep === 'generating') return;
         switch (currentStep) {
-            case 'idle': currentStep = 'ready'; updateUI(); break;
             case 'ready': cameraInput.click(); break;
             case 'framing': cropAndSave(); break;
             case 'saved': resetToReady(); break;
@@ -133,9 +132,6 @@
 
     function updateUI() {
         switch (currentStep) {
-            case 'idle':
-                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
-                break;
             case 'ready':
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
