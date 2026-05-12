@@ -348,9 +348,9 @@
             actionArea.innerHTML = `
                 <button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button>
                 <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                <button class="btn" onclick="shareAllPages()">📤 Поделиться (${savedPages.length})</button>
+                <button class="btn" onclick="printAllPages()">🖨 PDF (${savedPages.length})</button>
             `;
-            resultsDiv.classList.add('visible'); document.getElementById('resTip').textContent='Можно поделиться или сохранить.';
+            resultsDiv.classList.add('visible'); document.getElementById('resTip').textContent='Нажмите PDF для сохранения.';
         }, 'image/jpeg', 0.95);
     }
 
@@ -360,7 +360,7 @@
         const leftLen = Math.hypot(BL.x-TL.x, BL.y-TL.y), rightLen = Math.hypot(BR.x-TR.x, BR.y-TR.y);
         const outW = Math.round((topLen+bottomLen)/2), outH = Math.round((leftLen+rightLen)/2);
         if (outW<20||outH<20) return null;
-        const maxDim=4000; let s=1; if (Math.max(outW,outH)>maxDim) s=maxDim/Math.max(outW,outH);
+        const maxDim=2000; let s=1; if (Math.max(outW,outH)>maxDim) s=maxDim/Math.max(outW,outH);
         const fW=Math.round(outW*s), fH=Math.round(outH*s);
         const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];
         const H=computeHomography(srcPoints,dst); if (!H) return null;
@@ -385,7 +385,7 @@
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
 
     function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPages.length}`;}
-    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="shareAllPages()">📤 Поделиться (${savedPages.length})</button>`;}}
+    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="printAllPages()">🖨 PDF (${savedPages.length})</button>`;}}
     function resetToNewFrame(){
         canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);
         canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);
@@ -395,73 +395,58 @@
         updateLiveButtons(); startLiveView();
     }
 
-    function shareAllPages() {
+    function printAllPages() {
         if (savedPages.length === 0) {
             statusDiv.textContent = 'Нет сохранённых страниц.';
             statusDiv.className = 'status-bar error';
             return;
         }
 
-        if (savedPages.length === 1) {
-            shareSingleBlob(savedPages[0], 'FreePDFShoot_документ.jpg');
-            return;
-        }
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        
+        let imagesHTML = '';
+        savedPages.forEach((blob, index) => {
+            imagesHTML += `<img src="${URL.createObjectURL(blob)}" style="width:100%;max-height:100vh;object-fit:contain;display:block;page-break-after:${index < savedPages.length - 1 ? 'always' : 'auto'};background:white;" onload="this.dataset.loaded='true';">`;
+        });
 
-        const lastBlob = savedPages[savedPages.length - 1];
-        actionArea.innerHTML = `
-            <button class="btn" onclick="shareAllBlobs()">📤 Все (${savedPages.length} стр.)</button>
-            <button class="btn secondary" onclick="shareSingleBlob(lastBlob, 'FreePDFShoot_последняя.jpg')">📤 Последнюю</button>
-            <button class="btn danger" onclick="resetToNewFrame()">↺ Назад</button>
-        `;
-        statusDiv.textContent = 'Выберите, чем поделиться.';
-    }
+        printWindow.document.write(`
+            <html>
+            <head>
+                <title>FreePDFShoot – Документ</title>
+                <style>
+                    body { margin: 0; padding: 0; font-family: sans-serif; background: white; }
+                    img { display: block; background: white; }
+                    @media print {
+                        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                        body { background: white; }
+                        img { max-height: none; height: auto; page-break-after: always; background: white; }
+                        img:last-child { page-break-after: auto; }
+                    }
+                </style>
+            </head>
+            <body>${imagesHTML}</body>
+            </html>
+        `);
+        printWindow.document.close();
 
-    function shareSingleBlob(blob, filename = 'document.jpg') {
-        if (navigator.share) {
-            const file = new File([blob], filename, { type: 'image/jpeg' });
-            navigator.share({
-                title: 'FreePDFShoot',
-                text: 'Документ, отсканированный в FreePDFShoot',
-                files: [file]
-            }).catch(err => {
-                if (err.name !== 'AbortError') {
-                    downloadBlob(blob, filename);
-                }
-            });
-        } else {
-            downloadBlob(blob, filename);
-        }
-    }
-
-    async function shareAllBlobs() {
-        if (navigator.share && savedPages.length > 0) {
-            const files = savedPages.map((blob, i) => new File([blob], `страница_${i+1}.jpg`, { type: 'image/jpeg' }));
-            try {
-                await navigator.share({
-                    title: 'FreePDFShoot',
-                    text: 'Документ, отсканированный в FreePDFShoot',
-                    files: files
+        const tryPrint = () => {
+            const images = printWindow.document.querySelectorAll('img');
+            const allLoaded = Array.from(images).every(img => img.complete && img.naturalWidth > 0);
+            
+            if (allLoaded) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        printWindow.print();
+                    });
                 });
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    downloadBlob(savedPages[0], 'document.jpg');
-                }
+            } else {
+                setTimeout(tryPrint, 200);
             }
-        } else {
-            downloadBlob(savedPages[0], 'document.jpg');
-        }
-    }
-
-    function downloadBlob(blob, filename) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        statusDiv.textContent = '📥 Сохранено в загрузки.';
+        };
+        
+        setTimeout(tryPrint, 300);
+        statusDiv.textContent = '🖨 Открыто окно печати. Выберите «Сохранить как PDF».';
+        statusDiv.className = 'status-bar ready';
     }
 
     window.addEventListener('beforeunload',()=>{if(stream)stream.getTracks().forEach(t=>t.stop());savedPages.forEach(b=>URL.revokeObjectURL(b));});
