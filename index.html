@@ -175,8 +175,52 @@
     function onFramingTouchMove(e){if(currentStep!=='framing')return;e.preventDefault();e.stopPropagation();const t=e.touches[0],r=canvas.getBoundingClientRect();const cx=(t.clientX-r.left)*(canvas.width/r.width),cy=(t.clientY-r.top)*(canvas.height/r.height);if(longPressTimer&&!longPressTriggered){clearTimeout(longPressTimer);longPressTimer=null;}if(lensActive&&!longPressTriggered&&draggingCorner<0){lensX=cx;lensY=cy;drawFrozenScene();return;}if(draggingCorner>=0&&corners){corners[draggingCorner].x=Math.max(0,Math.min(canvas.width,cx));corners[draggingCorner].y=Math.max(0,Math.min(canvas.height,cy));drawFrozenScene();}}
     function onFramingTouchEnd(e){if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}draggingCorner=-1;longPressTriggered=false;}
     function onDoubleTap(e){if(currentStep!=='framing')return;e.preventDefault();const r=canvas.getBoundingClientRect();lensActive=!lensActive;if(lensActive){lensX=(e.clientX-r.left)*(canvas.width/r.width);lensY=(e.clientY-r.top)*(canvas.height/r.height);statusDiv.textContent='🔍 Лупа.';}else statusDiv.textContent='📐 Лупа выключена.';drawFrozenScene();}
-    function resetCorners(){const mX=canvas.width*.25,mY=canvas.height*.25;corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];lensActive=false;lensMode='full';draggingCorner=-1;longPressTriggered=false;if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}const b=document.querySelector('.btn.accent');if(b)b.textContent='🔍 Фрагмент';drawFrozenScene();statusDiv.textContent='📐 Сброшено.';}
-    function savePage(){if(currentStep!=='framing')return;currentStep='saving';canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);let src=(lensMode==='fragment'&&lensActive)?[{x:lensX-LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY+LENS_RADIUS},{x:lensX-LENS_RADIUS,y:lensY+LENS_RADIUS}]:corners;if(!src){statusDiv.textContent='Ошибка.';currentStep='framing';return;}const rectified=rectifyDocument(src,frozenImageData);if(!rectified){statusDiv.className='status-bar error';statusDiv.textContent='Ошибка ракурса. Поправьте маркеры.';currentStep='framing';return;}rectified.toBlob(blob=>{savedPages.push(blob);updatePageCounter();currentStep='saved';statusDiv.textContent='✅ Сохранено.';statusDiv.className='status-bar ready';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='Нажмите PDF для сохранения.';},'image/jpeg',0.92);}
+    function resetCorners(){
+        const mX=canvas.width*.25,mY=canvas.height*.25;
+        corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];
+        lensActive=false;lensMode='full';draggingCorner=-1;longPressTriggered=false;
+        if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}
+        const b=document.querySelector('.btn.accent');if(b)b.textContent='🔍 Фрагмент';
+        // ВОЗВРАЩАЕМСЯ К КАМЕРЕ
+        canvas.removeEventListener('touchstart',onFramingTouchStart);
+        canvas.removeEventListener('touchmove',onFramingTouchMove);
+        canvas.removeEventListener('touchend',onFramingTouchEnd);
+        canvas.removeEventListener('dblclick',onDoubleTap);
+        frozenImageData=null;
+        currentStep='ready';
+        statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';
+        actionArea.innerHTML=`<button class="btn" onclick="toggleBW()">📄 ${bwMode?'Цвет':'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
+        pageVisible=true; liveViewActive=true; startLiveView();
+    }
+    function savePage(){
+        if(currentStep!=='framing')return;
+        currentStep='saving';
+        canvas.removeEventListener('touchstart',onFramingTouchStart);
+        canvas.removeEventListener('touchmove',onFramingTouchMove);
+        canvas.removeEventListener('touchend',onFramingTouchEnd);
+        canvas.removeEventListener('dblclick',onDoubleTap);
+        let src=(lensMode==='fragment'&&lensActive)?[{x:lensX-LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY+LENS_RADIUS},{x:lensX-LENS_RADIUS,y:lensY+LENS_RADIUS}]:corners;
+        if(!src){statusDiv.textContent='Ошибка.';currentStep='framing';return;}
+        const rectified=rectifyDocument(src,frozenImageData);
+        if(!rectified){statusDiv.className='status-bar error';statusDiv.textContent='Ошибка ракурса. Поправьте маркеры.';currentStep='framing';return;}
+        rectified.toBlob(blob=>{
+            // СОХРАНЯЕМ КАК JPEG ДЛЯ ПРОВЕРКИ
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement('a');
+            a.href=url;
+            a.download='FreePDFShoot_test.jpg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            savedPages.push(blob);updatePageCounter();
+            currentStep='saved';statusDiv.textContent='✅ JPEG сохранён! Проверьте галерею.';
+            statusDiv.className='status-bar ready';
+            actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;
+            resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='JPEG сохранён. Откройте, чтобы проверить качество.';
+        },'image/jpeg',0.92);
+    }
     function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):enhanceContrast(tmp);}
     function toGray(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=4){const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;d[i]=d[i+1]=d[i+2]=g;}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
     function enhanceContrast(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;let mn=255,mx=0;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;if(g<mn)mn=g;if(g>mx)mx=g;}if(mx<=mn)return c;const r=mx-mn;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;const f=(g-mn)/r,ng=f*255,rt=g>1?ng/g:1;d[i]=Math.min(255,d[i]*rt);d[i+1]=Math.min(255,d[i+1]*rt);d[i+2]=Math.min(255,d[i+2]*rt);}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
