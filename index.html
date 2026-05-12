@@ -11,9 +11,8 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
         body { display: flex; flex-direction: column; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
-        .viewfinder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1; }
-        .viewfinder video, .viewfinder canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        .viewfinder canvas { z-index: 2; }
+        .viewfinder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1; display: flex; align-items: center; justify-content: center; }
+        .viewfinder canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
         .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: flex-end; }
         .ui-overlay > * { pointer-events: auto; }
         .header { position: absolute; top: 12px; left: 0; right: 0; text-align: center; z-index: 11; }
@@ -29,265 +28,386 @@
         .btn:disabled { background: rgba(58,58,58,0.8); color: #999; cursor: not-allowed; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
         .btn.danger { background: rgba(180,40,40,0.85); color: #fff; flex: 0.5; }
-        .btn.accent { background: #8e44ad; color: #fff; flex: 0.5; }
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
         .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
     </style>
 </head>
 <body>
-<div class="viewfinder"><video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas></div>
+<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
+<div class="viewfinder"><canvas id="canvas"></canvas></div>
 <div class="ui-overlay">
     <div class="header"><h1>FreePDFShoot</h1><div class="sub">Бесплатный • Приватный • Без серверов</div></div>
     <div class="page-counter" id="pageCounter">Страниц: 0</div>
-    <div class="status-bar" id="status">Нажмите «Включить камеру»</div>
-    <div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">Включить камеру</button></div>
+    <div class="status-bar" id="status">Нажмите «Снять» для запуска камеры</div>
+    <div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
     <div class="results" id="results"><div class="tip" id="resTip"></div></div>
 </div>
 <script>
-    const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const statusDiv = document.getElementById('status');
     const actionArea = document.getElementById('actionArea');
     const resultsDiv = document.getElementById('results');
     const pageCounter = document.getElementById('pageCounter');
+    const cameraInput = document.getElementById('cameraInput');
 
-    let stream, currentStep = 'idle';
-    let savedPageURLs = [];
+    let currentStep = 'idle';
+    let savedPages = [];
     let frozenImageData = null;
     let corners = null;
     let draggingCorner = -1;
     const HANDLE_SIZE = 44;
-    let lensActive = false, lensX = 0, lensY = 0;
-    const LENS_RADIUS = 100;
-    let lensMode = 'full';
     let longPressTimer = null, longPressTriggered = false;
-    let liveZoom = 1, lastPinchDist = 0, bwMode = false;
-    let liveViewActive = false;
-    let pageVisible = true;
 
     function handleAction() {
-        if (currentStep === 'saving') return;
         switch (currentStep) {
-            case 'idle': startCamera(); break;
-            case 'ready': freezeFrame(); break;
-            case 'framing': savePage(); break;
-            case 'saved': resetToNewFrame(); break;
+            case 'idle': currentStep = 'ready'; updateUI(); break;
+            case 'ready': cameraInput.click(); break;
+            case 'framing': cropAndSave(); break;
+            case 'saved': currentStep = 'ready'; updateUI(); break;
         }
     }
 
-    function releaseCamera() {
-        liveViewActive = false;
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        video.srcObject = null;
+    function onSystemPhoto(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const img = new Image();
+        img.onload = () => {
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+            frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const mX = canvas.width * .15, mY = canvas.height * .15;
+            corners = [
+                {x:mX, y:mY},
+                {x:canvas.width - mX, y:mY},
+                {x:canvas.width - mX, y:canvas.height - mY},
+                {x:mX, y:canvas.height - mY}
+            ];
+            draggingCorner = -1;
+            currentStep = 'framing';
+            statusDiv.textContent = '✂️ Расставьте маркеры для обрезки.';
+            statusDiv.className = 'status-bar ready';
+            updateUI();
+            bindFramingEvents();
+            drawFrozenScene();
+        };
+        img.src = URL.createObjectURL(file);
+        cameraInput.value = '';
     }
-
-    async function startCamera() {
-        releaseCamera();
-        statusDiv.textContent = 'Запрашиваю камеру...';
-        const configs = [
-            { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
-            { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
-            { video: { facingMode: 'environment' } }, { video: true }
-        ];
-        for (let c of configs) {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia(c);
-                video.srcObject = stream; await video.play();
-                canvas.width = video.videoWidth || canvas.clientWidth;
-                canvas.height = video.videoHeight || canvas.clientHeight;
-                currentStep = 'ready'; updatePageCounter();
-                statusDiv.textContent = 'Наведите камеру. Pinch-to-zoom.';
-                statusDiv.className = 'status-bar ready';
-                updateUI();
-                pageVisible = true; liveViewActive = true; startLiveView();
-                return;
-            } catch (err) { if (err.name === 'NotAllowedError') break; }
-        }
-        statusDiv.textContent = 'Ошибка доступа к камере.'; statusDiv.className = 'status-bar error';
-        actionArea.innerHTML = `<button class="btn" onclick="handleAction()">Попробовать снова</button>`;
-    }
-
-    function toggleBW() { bwMode = !bwMode; }
 
     function updateUI() {
         switch (currentStep) {
+            case 'idle':
+                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
+                break;
             case 'ready':
                 actionArea.innerHTML = `
-                    <button class="btn" onclick="toggleBW(); updateUI();">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button>
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
+                    ${savedPages.length > 0 ? `<button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>` : ''}
                 `;
                 break;
             case 'framing':
                 actionArea.innerHTML = `
-                    <button class="btn secondary" onclick="resetCorners()">↺ Сброс</button>
-                    <button class="btn accent" id="fragBtn" onclick="setFragmentMode()">🔍 Фрагмент</button>
-                    <button class="btn" id="actionBtn" onclick="handleAction()">✓ Сохранить</button>
+                    <button class="btn secondary" onclick="resetCrop()">↺ Сброс</button>
+                    <button class="btn" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
                 `;
                 break;
             case 'saved':
                 actionArea.innerHTML = `
-                    <button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button>
+                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
+                    <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
                 `;
                 break;
         }
     }
-
-    function setFragmentMode() {
-        lensMode = lensMode === 'full' ? 'fragment' : 'full';
-        const btn = document.getElementById('fragBtn');
-        if (btn) btn.textContent = lensMode === 'full' ? '🔍 Фрагмент' : '📄 Весь документ';
-    }
-
-    function startLiveView() {
-        let framePending = false;
-        const drawLive = () => {
-            if (!liveViewActive || !pageVisible || !stream) { framePending = false; return; }
-            if (framePending) { requestAnimationFrame(drawLive); return; }
-            framePending = true;
-            if (canvas.width < 10 || canvas.height < 10) { framePending = false; requestAnimationFrame(drawLive); return; }
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.scale(liveZoom, liveZoom); ctx.translate(-canvas.width/2, -canvas.height/2);
-            try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); } catch(e) { framePending = false; requestAnimationFrame(drawLive); return; }
-            ctx.restore();
-            if (bwMode && video.readyState >= 2 && canvas.width > 10 && canvas.height > 10) {
-                try {
-                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    for (let i = 0; i < imgData.data.length; i += 4) {
-                        const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
-                        imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
-                    }
-                    ctx.putImageData(imgData, 0, 0);
-                } catch(e) {}
-            }
-            framePending = false;
-            setTimeout(() => requestAnimationFrame(drawLive), 33);
-        };
-        drawLive();
-        canvas.addEventListener('touchstart', onLiveTouchStart, { passive: false });
-        canvas.addEventListener('touchmove', onLiveTouchMove, { passive: false });
-        canvas.addEventListener('touchend', onLiveTouchEnd);
-    }
-    function onLiveTouchStart(e) { if(e.touches.length===2) lastPinchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); }
-    function onLiveTouchMove(e){ if(e.touches.length===2){ e.preventDefault(); const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); if(lastPinchDist) liveZoom=Math.max(1,Math.min(5,liveZoom*(dist/lastPinchDist))); lastPinchDist=dist; } }
-    function onLiveTouchEnd(e){ if(e.touches.length<2) lastPinchDist=0; }
 
     function bindFramingEvents() {
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
         canvas.addEventListener('touchend', onFramingTouchEnd);
-        canvas.addEventListener('dblclick', onDoubleTap);
     }
     function unbindFramingEvents() {
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
-        canvas.removeEventListener('dblclick', onDoubleTap);
     }
 
-    function freezeFrame() {
-        liveViewActive = false;
-        canvas.removeEventListener('touchstart', onLiveTouchStart);
-        canvas.removeEventListener('touchmove', onLiveTouchMove);
-        canvas.removeEventListener('touchend', onLiveTouchEnd);
-        ctx.save(); ctx.translate(canvas.width/2,canvas.height/2); ctx.scale(liveZoom,liveZoom); ctx.translate(-canvas.width/2,-canvas.height/2);
-        ctx.drawImage(video,0,0,canvas.width,canvas.height); ctx.restore();
-        if(bwMode){ const d=ctx.getImageData(0,0,canvas.width,canvas.height); for(let i=0;i<d.data.length;i+=4){ const g=d.data[i]*0.299+d.data[i+1]*0.587+d.data[i+2]*0.114; d.data[i]=d.data[i+1]=d.data[i+2]=g; } ctx.putImageData(d,0,0); }
-        frozenImageData=ctx.getImageData(0,0,canvas.width,canvas.height);
-        const mX=canvas.width*.25,mY=canvas.height*.25;
-        corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];
-        lensActive=false;lensMode='full';longPressTriggered=false;draggingCorner=-1;if(longPressTimer)clearTimeout(longPressTimer);
-        currentStep='framing';statusDiv.textContent='📐 Расставьте маркеры.';statusDiv.className='status-bar ready';
-        updateUI();
-        bindFramingEvents();
+    function drawFrozenScene() {
+        if (!frozenImageData) return;
+        ctx.putImageData(frozenImageData, 0, 0);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (!corners) return;
+        const [TL, TR, BR, BL] = corners;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(TL.x, TL.y);
+        ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y);
+        ctx.lineTo(BL.x, BL.y);
+        ctx.closePath();
+        ctx.clip();
+        ctx.putImageData(frozenImageData, 0, 0);
+        ctx.restore();
+        ctx.strokeStyle = '#2a6df4';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(TL.x, TL.y);
+        ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y);
+        ctx.lineTo(BL.x, BL.y);
+        ctx.closePath();
+        ctx.stroke();
+        corners.forEach((c, i) => {
+            ctx.fillStyle = '#2a6df4';
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, HANDLE_SIZE / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, c.x, c.y + 5);
+        });
+    }
+
+    function onFramingTouchStart(e) {
+        if (currentStep !== 'framing') return;
+        e.preventDefault();
+        e.stopPropagation();
+        const t = e.touches[0], r = canvas.getBoundingClientRect();
+        const sx = (t.clientX - r.left) * (canvas.width / r.width);
+        const sy = (t.clientY - r.top) * (canvas.height / r.height);
+        longPressTriggered = false;
+        if (longPressTimer) clearTimeout(longPressTimer);
+        if (corners) {
+            for (let i = 0; i < corners.length; i++) {
+                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
+                    draggingCorner = i;
+                    return;
+                }
+            }
+        }
+    }
+
+    function onFramingTouchMove(e) {
+        if (draggingCorner < 0 || !corners) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const t = e.touches[0], r = canvas.getBoundingClientRect();
+        const cx = (t.clientX - r.left) * (canvas.width / r.width);
+        const cy = (t.clientY - r.top) * (canvas.height / r.height);
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, cx));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, cy));
         drawFrozenScene();
     }
 
-    function getCornersQuality(c){let p=0,g=0,b=0;for(let i=0;i<4;i++){const pr=c[(i+3)%4],cu=c[i],nx=c[(i+1)%4];const a=Math.abs(Math.atan2((pr.x-cu.x)*(nx.y-cu.y)-(pr.y-cu.y)*(nx.x-cu.x),(pr.x-cu.x)*(nx.x-cu.x)+(pr.y-cu.y)*(nx.y-cu.y))*180/Math.PI);if(a>88&&a<92)p++;else if(a>80&&a<100)g++;else b++;}if(p===4)return'perfect';if(b>0)return'bad';return g>=2?'good':'neutral';}
-    function drawFrozenScene(){
-        if(!frozenImageData)return;
-        ctx.putImageData(frozenImageData,0,0);ctx.fillStyle='rgba(0,0,0,0.4)';ctx.fillRect(0,0,canvas.width,canvas.height);
-        if(!corners)return;
-        const q=getCornersQuality(corners);const col=q==='perfect'?'#00ff88':q==='good'?'#ffdd57':q==='bad'?'#ff4444':'#2a6df4';
-        if(lensMode==='full'){const[TL,TR,BR,BL]=corners;ctx.save();ctx.beginPath();ctx.moveTo(TL.x,TL.y);ctx.lineTo(TR.x,TR.y);ctx.lineTo(BR.x,BR.y);ctx.lineTo(BL.x,BL.y);ctx.closePath();ctx.clip();ctx.putImageData(frozenImageData,0,0);ctx.restore();ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(TL.x,TL.y);ctx.lineTo(TR.x,TR.y);ctx.lineTo(BR.x,BR.y);ctx.lineTo(BL.x,BL.y);ctx.closePath();ctx.stroke();corners.forEach((c,i)=>{ctx.fillStyle=col;ctx.beginPath();ctx.arc(c.x,c.y,HANDLE_SIZE/2,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText(i+1,c.x,c.y+5);});}
-        if(lensActive){ctx.save();ctx.beginPath();ctx.arc(lensX,lensY,LENS_RADIUS,0,Math.PI*2);ctx.clip();ctx.drawImage(canvas,lensX-LENS_RADIUS*.8,lensY-LENS_RADIUS*.8,LENS_RADIUS*1.6,LENS_RADIUS*1.6,lensX-LENS_RADIUS,lensY-LENS_RADIUS,LENS_RADIUS*2,LENS_RADIUS*2);ctx.restore();ctx.beginPath();ctx.arc(lensX,lensY,LENS_RADIUS,0,Math.PI*2);ctx.strokeStyle=lensMode==='fragment'?'#8e44ad':'#fff';ctx.lineWidth=4;ctx.setLineDash(lensMode==='fragment'?[6,3]:[]);ctx.stroke();ctx.setLineDash([]);}
-    }
-    function onFramingTouchStart(e){if(currentStep!=='framing')return;e.preventDefault();e.stopPropagation();const t=e.touches[0],r=canvas.getBoundingClientRect();const sx=(t.clientX-r.left)*(canvas.width/r.width),sy=(t.clientY-r.top)*(canvas.height/r.height);longPressTriggered=false;if(longPressTimer)clearTimeout(longPressTimer);if(lensActive&&corners){for(let i=0;i<corners.length;i++){if(Math.hypot(sx-corners[i].x,sy-corners[i].y)<HANDLE_SIZE*1.5){longPressTimer=setTimeout(()=>{longPressTriggered=true;draggingCorner=i;},300);return;}}}if(lensActive){lensX=sx;lensY=sy;drawFrozenScene();}else if(corners){for(let i=0;i<corners.length;i++){if(Math.hypot(sx-corners[i].x,sy-corners[i].y)<HANDLE_SIZE*1.3){draggingCorner=i;return;}}}}
-    function onFramingTouchMove(e){if(currentStep!=='framing')return;e.preventDefault();e.stopPropagation();const t=e.touches[0],r=canvas.getBoundingClientRect();const cx=(t.clientX-r.left)*(canvas.width/r.width),cy=(t.clientY-r.top)*(canvas.height/r.height);if(longPressTimer&&!longPressTriggered){clearTimeout(longPressTimer);longPressTimer=null;}if(lensActive&&!longPressTriggered&&draggingCorner<0){lensX=cx;lensY=cy;drawFrozenScene();return;}if(draggingCorner>=0&&corners){corners[draggingCorner].x=Math.max(0,Math.min(canvas.width,cx));corners[draggingCorner].y=Math.max(0,Math.min(canvas.height,cy));drawFrozenScene();}}
-    function onFramingTouchEnd(e){if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}draggingCorner=-1;longPressTriggered=false;}
-    function onDoubleTap(e){if(currentStep!=='framing')return;e.preventDefault();const r=canvas.getBoundingClientRect();lensActive=!lensActive;if(lensActive){lensX=(e.clientX-r.left)*(canvas.width/r.width);lensY=(e.clientY-r.top)*(canvas.height/r.height);statusDiv.textContent='🔍 Лупа.';}else statusDiv.textContent='📐 Лупа выключена.';drawFrozenScene();}
-    function resetCorners(){
-        const mX=canvas.width*.25,mY=canvas.height*.25;
-        corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];
-        lensActive=false;lensMode='full';draggingCorner=-1;longPressTriggered=false;
-        if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}
-        unbindFramingEvents();
-        frozenImageData=null;
-        currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';
-        updateUI();
-        pageVisible=true; liveViewActive=true; startLiveView();
-    }
-    function savePage(){
-        if(currentStep!=='framing')return;
-        currentStep='saving';
-        unbindFramingEvents();
-        let src=(lensMode==='fragment'&&lensActive)?[{x:lensX-LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY+LENS_RADIUS},{x:lensX-LENS_RADIUS,y:lensY+LENS_RADIUS}]:corners;
-        if(!src){statusDiv.textContent='Ошибка.';currentStep='framing';return;}
-        const rectified=rectifyDocument(src,frozenImageData);
-        if(!rectified){statusDiv.className='status-bar error';statusDiv.textContent='Ошибка ракурса. Поправьте маркеры.';currentStep='framing';return;}
-        rectified.toBlob(blob=>{
-            const url=URL.createObjectURL(blob);
-            const a=document.createElement('a');
-            a.href=url;
-            a.download=`FreePDFShoot_${Date.now()}.jpg`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            savedPageURLs.push(url);
-            updatePageCounter();
-            currentStep='saved';statusDiv.textContent='✅ JPEG сохранён!';
-            statusDiv.className='status-bar ready';
-            updateUI();
-            resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='Проверьте галерею.';
-        },'image/jpeg',0.92);
-    }
-    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return tmp;}
-    function computeHomography(s,d){const A=[],b=[];for(let i=0;i<4;i++){A.push([s[i].x,s[i].y,1,0,0,0,-d[i].x*s[i].x,-d[i].x*s[i].y]);b.push(d[i].x);A.push([0,0,0,s[i].x,s[i].y,1,-d[i].y*s[i].x,-d[i].y*s[i].y]);b.push(d[i].y);}const n=8,aug=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(aug[r][c])>Math.abs(aug[mr][c]))mr=r;[aug[c],aug[mr]]=[aug[mr],aug[c]];if(Math.abs(aug[c][c])<1e-12)return null;for(let j=c;j<=n;j++)aug[c][j]/=aug[c][c];for(let r=0;r<n;r++){if(r===c)continue;const f=aug[r][c];for(let j=c;j<=n;j++)aug[r][j]-=f*aug[c][j];}}return aug.map(r=>r[8]).concat([1]);}
-    function invertHomography(H){const[a,b,c,d,e,f,g,h,i]=H,det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-12)return null;const id=1/det;return[(e*i-f*h)*id,(c*h-b*i)*id,(b*f-c*e)*id,(f*g-d*i)*id,(a*i-c*g)*id,(c*d-a*f)*id,(d*h-e*g)*id,(b*g-a*h)*id,(a*e-b*d)*id];}
-    function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
-    function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPageURLs.length}`;}
-    function removeLastPage(){if(!savedPageURLs.length)return;const url=savedPageURLs.pop();URL.revokeObjectURL(url);updatePageCounter();if(!savedPageURLs.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';updateUI();}}
-    function resetToNewFrame(){unbindFramingEvents();frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';updateUI();pageVisible = true; liveViewActive = true; startLiveView();}
-
-    function fullCleanup() {
-        liveViewActive = false; pageVisible = false;
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        video.srcObject = null;
+    function onFramingTouchEnd(e) {
+        draggingCorner = -1;
         if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-        canvas.removeEventListener('touchstart', onLiveTouchStart);
-        canvas.removeEventListener('touchmove', onLiveTouchMove);
-        canvas.removeEventListener('touchend', onLiveTouchEnd);
+    }
+
+    function resetCrop() {
+        const mX = canvas.width * .15, mY = canvas.height * .15;
+        corners = [
+            {x:mX, y:mY},
+            {x:canvas.width - mX, y:mY},
+            {x:canvas.width - mX, y:canvas.height - mY},
+            {x:mX, y:canvas.height - mY}
+        ];
+        drawFrozenScene();
+    }
+
+    function cropAndSave() {
+        if (currentStep !== 'framing') return;
         unbindFramingEvents();
-        savedPageURLs.forEach(url => URL.revokeObjectURL(url));
-        savedPageURLs = [];
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const [TL, TR, BR, BL] = corners;
+        const minX = Math.max(0, Math.min(TL.x, BL.x));
+        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
+        const minY = Math.max(0, Math.min(TL.y, TR.y));
+        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
+        const cropW = maxX - minX;
+        const cropH = maxY - minY;
+        if (cropW < 10 || cropH < 10) {
+            statusDiv.textContent = 'Область слишком мала.';
+            statusDiv.className = 'status-bar error';
+            return;
+        }
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = cropW;
+        tmpCanvas.height = cropH;
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.putImageData(frozenImageData, -minX, -minY, minX, minY, cropW, cropH);
+        tmpCanvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            savedPages.push(url);
+            updatePageCounter();
+            frozenImageData = null;
+            corners = null;
+            currentStep = 'saved';
+            statusDiv.textContent = '✅ Страница сохранена!';
+            statusDiv.className = 'status-bar ready';
+            updateUI();
+            resultsDiv.classList.add('visible');
+            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}. Можно отправить или добавить ещё.`;
+        }, 'image/jpeg', 0.92);
     }
 
-    window.addEventListener('pagehide', () => { pageVisible = false; releaseCamera(); });
-    window.addEventListener('pageshow', () => { pageVisible = true; if (currentStep === 'ready') startLiveView(); });
-    window.addEventListener('visibilitychange', () => {
-        if (document.hidden) { pageVisible = false; releaseCamera(); }
-        else { pageVisible = true; if (currentStep === 'ready') startLiveView(); }
+    function updatePageCounter() {
+        pageCounter.textContent = `Страниц: ${savedPages.length}`;
+    }
+
+    function removeLastPage() {
+        if (!savedPages.length) return;
+        const url = savedPages.pop();
+        URL.revokeObjectURL(url);
+        updatePageCounter();
+        if (!savedPages.length) {
+            resultsDiv.classList.remove('visible');
+            frozenImageData = null;
+            corners = null;
+            currentStep = 'ready';
+        }
+        statusDiv.textContent = '🗑 Последняя страница удалена.';
+        updateUI();
+    }
+
+    async function sharePDF() {
+        if (savedPages.length === 0) {
+            statusDiv.textContent = 'Нет сохранённых страниц.';
+            return;
+        }
+        statusDiv.textContent = 'Создаю PDF...';
+        try {
+            const pdfBytes = await generatePDF(savedPages);
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const file = new File([blob], 'FreePDFShoot.pdf', { type: 'application/pdf' });
+            if (navigator.share) {
+                await navigator.share({
+                    title: 'FreePDFShoot',
+                    text: 'Документ, отсканированный в FreePDFShoot',
+                    files: [file]
+                });
+                statusDiv.textContent = '✅ Отправлено!';
+            } else {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'FreePDFShoot.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                statusDiv.textContent = '✅ PDF сохранён!';
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                console.error(err);
+                statusDiv.textContent = 'Ошибка создания PDF.';
+                statusDiv.className = 'status-bar error';
+            }
+        }
+    }
+
+    async function generatePDF(pageURLs) {
+        const images = [];
+        for (const url of pageURLs) {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const buf = await blob.arrayBuffer();
+            images.push({ data: new Uint8Array(buf), dims: null });
+        }
+        for (const img of images) {
+            img.dims = getJPEGDimensions(img.data);
+        }
+        const pageW = 595, pageH = 842;
+        const parts = [], offsets = [];
+        let objNum = 1;
+        const imgObjNums = [], pageObjNums = [];
+        function addText(str) { parts.push(new TextEncoder().encode(str)); }
+        addText('%PDF-1.4\n');
+        for (const img of images) {
+            const ascii85 = encodeAscii85(img.data);
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            imgObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCII85Decode /DCTDecode] /Length ${ascii85.length} >>\nstream\n${ascii85}\nendstream\nendobj\n`);
+            objNum++;
+        }
+        const kids = [];
+        for (let i = 0; i < images.length; i++) {
+            const img = images[i];
+            const scale = Math.min((pageW - 40) / img.dims.width, (pageH - 40) / img.dims.height);
+            const w = img.dims.width * scale, h = img.dims.height * scale;
+            const x = (pageW - w) / 2, y = (pageH - h) / 2;
+            const cont = `q ${w} 0 0 ${h} ${x} ${pageH - y - h} cm /Im${imgObjNums[i]} Do Q`;
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            pageObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /Page /Parent ${objNum + 2} 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${objNum + 1} 0 R /Resources << /XObject << /Im${imgObjNums[i]} ${imgObjNums[i]} 0 R >> >> >>\nendobj\n`);
+            objNum++;
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            addText(`${objNum} 0 obj\n<< /Length ${cont.length} >>\nstream\n${cont}\nendstream\nendobj\n`);
+            objNum++;
+            kids.push(pageObjNums[i]);
+        }
+        const kidsStr = kids.map(k => `${k} 0 R`).join(' ');
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const pagesObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${kids.length} >>\nendobj\n`);
+        objNum++;
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const catalogObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Catalog /Pages ${pagesObjNum} 0 R >>\nendobj\n`);
+        objNum++;
+        const xrefPos = parts.reduce((acc, p) => acc + p.length, 0);
+        addText(`xref\n0 ${objNum}\n0000000000 65535 f \n`);
+        for (const off of offsets) addText(`${String(off).padStart(10, '0')} 00000 n \n`);
+        addText(`trailer\n<< /Size ${objNum} /Root ${catalogObjNum} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
+        const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const part of parts) { result.set(part, offset); offset += part.length; }
+        return result;
+    }
+
+    function encodeAscii85(data) {
+        let result = '', group = 0, count = 0;
+        for (let i = 0; i < data.length; i++) {
+            group = group * 256 + data[i]; count++;
+            if (count === 4) {
+                if (group === 0) { result += 'z'; }
+                else { let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple; }
+                group = 0; count = 0;
+            }
+        }
+        if (count > 0) { for (let j = count; j < 4; j++) group *= 256; let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple.substring(0, count + 1); }
+        return result + '~>';
+    }
+
+    function getJPEGDimensions(data) {
+        let offset = 0;
+        if (data[0] !== 0xFF || data[1] !== 0xD8) return { width: 800, height: 600 };
+        offset += 2;
+        while (offset < data.length) {
+            if (data[offset] !== 0xFF) break;
+            const marker = data[offset + 1];
+            if (marker === 0xC0 || marker === 0xC2) {
+                return { width: (data[offset+7]<<8)|data[offset+8], height: (data[offset+5]<<8)|data[offset+6] };
+            }
+            const length = (data[offset+2]<<8)|data[offset+3];
+            offset += 2 + length;
+        }
+        return { width: 800, height: 600 };
+    }
+
+    window.addEventListener('beforeunload', () => {
+        savedPages.forEach(url => URL.revokeObjectURL(url));
+        savedPages = [];
     });
-    window.addEventListener('beforeunload', fullCleanup);
-
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/freepdfshoot/sw.js')
-            .then(() => console.log('SW registered'))
-            .catch(() => console.log('SW registration failed'));
-    }
 </script>
 </body>
 </html>
