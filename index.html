@@ -31,11 +31,20 @@
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
         .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
+        .progress-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 20; display: none; align-items: center; justify-content: center; flex-direction: column; }
+        .progress-overlay.visible { display: flex; }
+        .progress-text { color: #fff; font-size: 1rem; margin-bottom: 12px; }
+        .progress-bar { width: 200px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #2a6df4; transition: width 0.3s; }
     </style>
 </head>
 <body>
 <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
 <div class="viewfinder"><canvas id="canvas"></canvas></div>
+<div class="progress-overlay" id="progressOverlay">
+    <div class="progress-text" id="progressText">Создаю PDF...</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+</div>
 <div class="ui-overlay">
     <div class="header"><h1>FreePDFShoot</h1><div class="sub">Бесплатный • Приватный • Без серверов</div></div>
     <div class="page-counter" id="pageCounter">Страниц: 0</div>
@@ -51,6 +60,9 @@
     const resultsDiv = document.getElementById('results');
     const pageCounter = document.getElementById('pageCounter');
     const cameraInput = document.getElementById('cameraInput');
+    const progressOverlay = document.getElementById('progressOverlay');
+    const progressText = document.getElementById('progressText');
+    const progressFill = document.getElementById('progressFill');
 
     let currentStep = 'idle';
     let savedPages = [];
@@ -58,14 +70,16 @@
     let corners = null;
     let draggingCorner = -1;
     const HANDLE_SIZE = 44;
-    let longPressTimer = null, longPressTriggered = false;
+    let originalImage = null;
+    let displayScale = 1;
 
     function handleAction() {
+        if (currentStep === 'saving' || currentStep === 'generating') return;
         switch (currentStep) {
             case 'idle': currentStep = 'ready'; updateUI(); break;
             case 'ready': cameraInput.click(); break;
             case 'framing': cropAndSave(); break;
-            case 'saved': currentStep = 'ready'; updateUI(); break;
+            case 'saved': resetToReady(); break;
         }
     }
 
@@ -74,11 +88,17 @@
         if (!file) return;
         const img = new Image();
         img.onload = () => {
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            ctx.drawImage(img, 0, 0);
+            originalImage = img;
+            const MAX_DIM = 1500;
+            displayScale = 1;
+            if (img.naturalWidth > MAX_DIM || img.naturalHeight > MAX_DIM) {
+                displayScale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+            }
+            canvas.width = Math.round(img.naturalWidth * displayScale);
+            canvas.height = Math.round(img.naturalHeight * displayScale);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const mX = canvas.width * .15, mY = canvas.height * .15;
+            const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
             corners = [
                 {x:mX, y:mY},
                 {x:canvas.width - mX, y:mY},
@@ -97,6 +117,20 @@
         cameraInput.value = '';
     }
 
+    function resetToReady() {
+        unbindFramingEvents();
+        frozenImageData = null;
+        corners = null;
+        originalImage = null;
+        draggingCorner = -1;
+        resultsDiv.classList.remove('visible');
+        currentStep = 'ready';
+        statusDiv.textContent = 'Нажмите «Снять» для запуска камеры';
+        statusDiv.className = 'status-bar ready';
+        updateUI();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
     function updateUI() {
         switch (currentStep) {
             case 'idle':
@@ -105,7 +139,10 @@
             case 'ready':
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
-                    ${savedPages.length > 0 ? `<button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>` : ''}
+                    ${savedPages.length > 0 ? `
+                        <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
+                        <button class="btn danger" onclick="clearAllPages()">🗑 Всё</button>
+                    ` : ''}
                 `;
                 break;
             case 'framing':
@@ -114,12 +151,18 @@
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
                 `;
                 break;
+            case 'saving':
+                actionArea.innerHTML = `<button class="btn" disabled>⏳ Сохраняю...</button>`;
+                break;
             case 'saved':
                 actionArea.innerHTML = `
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
+                    <button class="btn secondary" onclick="resetToReady()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
+                    <button class="btn" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
                 `;
+                break;
+            case 'generating':
+                actionArea.innerHTML = `<button class="btn" disabled>⏳ Создаю PDF...</button>`;
                 break;
         }
     }
@@ -183,8 +226,6 @@
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        longPressTriggered = false;
-        if (longPressTimer) clearTimeout(longPressTimer);
         if (corners) {
             for (let i = 0; i < corners.length; i++) {
                 if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
@@ -194,7 +235,6 @@
             }
         }
     }
-
     function onFramingTouchMove(e) {
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
@@ -206,14 +246,10 @@
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, cy));
         drawFrozenScene();
     }
-
-    function onFramingTouchEnd(e) {
-        draggingCorner = -1;
-        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    }
+    function onFramingTouchEnd(e) { draggingCorner = -1; }
 
     function resetCrop() {
-        const mX = canvas.width * .15, mY = canvas.height * .15;
+        const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
         corners = [
             {x:mX, y:mY},
             {x:canvas.width - mX, y:mY},
@@ -225,6 +261,8 @@
 
     function cropAndSave() {
         if (currentStep !== 'framing') return;
+        currentStep = 'saving';
+        updateUI();
         unbindFramingEvents();
         const [TL, TR, BR, BL] = corners;
         const minX = Math.max(0, Math.min(TL.x, BL.x));
@@ -236,16 +274,20 @@
         if (cropW < 10 || cropH < 10) {
             statusDiv.textContent = 'Область слишком мала.';
             statusDiv.className = 'status-bar error';
+            currentStep = 'framing';
+            bindFramingEvents();
+            updateUI();
             return;
         }
+        const invScale = 1 / displayScale;
         const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = cropW;
-        tmpCanvas.height = cropH;
+        tmpCanvas.width = Math.round(cropW * invScale);
+        tmpCanvas.height = Math.round(cropH * invScale);
         const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.putImageData(frozenImageData, -minX, -minY, minX, minY, cropW, cropH);
+        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         tmpCanvas.toBlob(blob => {
             const url = URL.createObjectURL(blob);
-            savedPages.push(url);
+            savedPages.push({ url, blob });
             updatePageCounter();
             frozenImageData = null;
             corners = null;
@@ -258,42 +300,41 @@
         }, 'image/jpeg', 0.92);
     }
 
-    function updatePageCounter() {
-        pageCounter.textContent = `Страниц: ${savedPages.length}`;
-    }
+    function updatePageCounter() { pageCounter.textContent = `Страниц: ${savedPages.length}`; }
 
     function removeLastPage() {
         if (!savedPages.length) return;
-        const url = savedPages.pop();
-        URL.revokeObjectURL(url);
+        const item = savedPages.pop();
+        URL.revokeObjectURL(item.url);
         updatePageCounter();
         if (!savedPages.length) {
             resultsDiv.classList.remove('visible');
-            frozenImageData = null;
-            corners = null;
-            currentStep = 'ready';
+            resetToReady();
+        } else {
+            statusDiv.textContent = '🗑 Последняя страница удалена.';
+            updateUI();
         }
-        statusDiv.textContent = '🗑 Последняя страница удалена.';
-        updateUI();
+    }
+
+    function clearAllPages() {
+        if (!confirm('Удалить все страницы?')) return;
+        savedPages.forEach(item => URL.revokeObjectURL(item.url));
+        savedPages = [];
+        updatePageCounter();
+        resetToReady();
     }
 
     async function sharePDF() {
-        if (savedPages.length === 0) {
-            statusDiv.textContent = 'Нет сохранённых страниц.';
-            return;
-        }
-        statusDiv.textContent = 'Создаю PDF...';
+        if (savedPages.length === 0) return;
+        currentStep = 'generating';
+        updateUI();
+        progressOverlay.classList.add('visible');
         try {
-            const pdfBytes = await generatePDF(savedPages);
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const blobs = savedPages.map(p => p.blob);
+            const blob = await generatePDFBlob(blobs);
             const file = new File([blob], 'FreePDFShoot.pdf', { type: 'application/pdf' });
             if (navigator.share) {
-                await navigator.share({
-                    title: 'FreePDFShoot',
-                    text: 'Документ, отсканированный в FreePDFShoot',
-                    files: [file]
-                });
-                statusDiv.textContent = '✅ Отправлено!';
+                await navigator.share({ title: 'FreePDFShoot', text: 'Документ', files: [file] });
             } else {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -303,27 +344,32 @@
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                statusDiv.textContent = '✅ PDF сохранён!';
             }
+            statusDiv.textContent = '✅ Отправлено!';
+            statusDiv.className = 'status-bar ready';
         } catch (err) {
             if (err.name !== 'AbortError') {
                 console.error(err);
                 statusDiv.textContent = 'Ошибка создания PDF.';
                 statusDiv.className = 'status-bar error';
             }
+        } finally {
+            progressOverlay.classList.remove('visible');
+            currentStep = 'saved';
+            updateUI();
         }
     }
 
-    async function generatePDF(pageURLs) {
+    async function generatePDFBlob(blobs) {
         const images = [];
-        for (const url of pageURLs) {
-            const response = await fetch(url);
-            const blob = await response.blob();
-            const buf = await blob.arrayBuffer();
+        for (let i = 0; i < blobs.length; i++) {
+            const buf = await blobs[i].arrayBuffer();
             images.push({ data: new Uint8Array(buf), dims: null });
         }
-        for (const img of images) {
-            img.dims = getJPEGDimensions(img.data);
+        for (let i = 0; i < images.length; i++) {
+            progressText.textContent = `Обрабатываю ${i + 1} из ${images.length}...`;
+            progressFill.style.width = `${Math.round((i / images.length) * 100)}%`;
+            images[i].dims = await getJPEGDimensionsFromBlob(blobs[i]);
         }
         const pageW = 595, pageH = 842;
         const parts = [], offsets = [];
@@ -332,10 +378,11 @@
         function addText(str) { parts.push(new TextEncoder().encode(str)); }
         addText('%PDF-1.4\n');
         for (const img of images) {
-            const ascii85 = encodeAscii85(img.data);
             offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
             imgObjNums.push(objNum);
-            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCII85Decode /DCTDecode] /Length ${ascii85.length} >>\nstream\n${ascii85}\nendstream\nendobj\n`);
+            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/DCTDecode] /Length ${img.data.length} >>\nstream\n`);
+            parts.push(img.data);
+            addText('\nendstream\nendobj\n');
             objNum++;
         }
         const kids = [];
@@ -371,41 +418,22 @@
         const result = new Uint8Array(totalLength);
         let offset = 0;
         for (const part of parts) { result.set(part, offset); offset += part.length; }
-        return result;
+        return new Blob([result], { type: 'application/pdf' });
     }
 
-    function encodeAscii85(data) {
-        let result = '', group = 0, count = 0;
-        for (let i = 0; i < data.length; i++) {
-            group = group * 256 + data[i]; count++;
-            if (count === 4) {
-                if (group === 0) { result += 'z'; }
-                else { let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple; }
-                group = 0; count = 0;
-            }
+    async function getJPEGDimensionsFromBlob(blob) {
+        try {
+            const img = await createImageBitmap(blob);
+            const dims = { width: img.width, height: img.height };
+            img.close();
+            return dims;
+        } catch(e) {
+            return { width: 800, height: 600 };
         }
-        if (count > 0) { for (let j = count; j < 4; j++) group *= 256; let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple.substring(0, count + 1); }
-        return result + '~>';
-    }
-
-    function getJPEGDimensions(data) {
-        let offset = 0;
-        if (data[0] !== 0xFF || data[1] !== 0xD8) return { width: 800, height: 600 };
-        offset += 2;
-        while (offset < data.length) {
-            if (data[offset] !== 0xFF) break;
-            const marker = data[offset + 1];
-            if (marker === 0xC0 || marker === 0xC2) {
-                return { width: (data[offset+7]<<8)|data[offset+8], height: (data[offset+5]<<8)|data[offset+6] };
-            }
-            const length = (data[offset+2]<<8)|data[offset+3];
-            offset += 2 + length;
-        }
-        return { width: 800, height: 600 };
     }
 
     window.addEventListener('beforeunload', () => {
-        savedPages.forEach(url => URL.revokeObjectURL(url));
+        savedPages.forEach(item => URL.revokeObjectURL(item.url));
         savedPages = [];
     });
 </script>
