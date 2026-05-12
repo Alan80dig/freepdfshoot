@@ -78,10 +78,7 @@
 
     function releaseCamera() {
         liveViewActive = false;
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-            stream = null;
-        }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         video.srcObject = null;
     }
 
@@ -96,8 +93,7 @@
         for (let c of configs) {
             try {
                 stream = await navigator.mediaDevices.getUserMedia(c);
-                video.srcObject = stream;
-                await video.play();
+                video.srcObject = stream; await video.play();
                 canvas.width = video.videoWidth || canvas.clientWidth;
                 canvas.height = video.videoHeight || canvas.clientHeight;
                 currentStep = 'ready'; updatePageCounter();
@@ -180,8 +176,6 @@
         corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];
         lensActive=false;lensMode='full';draggingCorner=-1;longPressTriggered=false;
         if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}
-        const b=document.querySelector('.btn.accent');if(b)b.textContent='🔍 Фрагмент';
-        // ВОЗВРАЩАЕМСЯ К КАМЕРЕ
         canvas.removeEventListener('touchstart',onFramingTouchStart);
         canvas.removeEventListener('touchmove',onFramingTouchMove);
         canvas.removeEventListener('touchend',onFramingTouchEnd);
@@ -204,7 +198,6 @@
         const rectified=rectifyDocument(src,frozenImageData);
         if(!rectified){statusDiv.className='status-bar error';statusDiv.textContent='Ошибка ракурса. Поправьте маркеры.';currentStep='framing';return;}
         rectified.toBlob(blob=>{
-            // СОХРАНЯЕМ КАК JPEG ДЛЯ ПРОВЕРКИ
             const url=URL.createObjectURL(blob);
             const a=document.createElement('a');
             a.href=url;
@@ -213,7 +206,6 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            
             savedPages.push(blob);updatePageCounter();
             currentStep='saved';statusDiv.textContent='✅ JPEG сохранён! Проверьте галерею.';
             statusDiv.className='status-bar ready';
@@ -221,9 +213,8 @@
             resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='JPEG сохранён. Откройте, чтобы проверить качество.';
         },'image/jpeg',0.92);
     }
-    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):enhanceContrast(tmp);}
+    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):tmp;}
     function toGray(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=4){const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;d[i]=d[i+1]=d[i+2]=g;}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
-    function enhanceContrast(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;let mn=255,mx=0;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;if(g<mn)mn=g;if(g>mx)mx=g;}if(mx<=mn)return c;const r=mx-mn;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;const f=(g-mn)/r,ng=f*255,rt=g>1?ng/g:1;d[i]=Math.min(255,d[i]*rt);d[i+1]=Math.min(255,d[i+1]*rt);d[i+2]=Math.min(255,d[i+2]*rt);}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
     function computeHomography(s,d){const A=[],b=[];for(let i=0;i<4;i++){A.push([s[i].x,s[i].y,1,0,0,0,-d[i].x*s[i].x,-d[i].x*s[i].y]);b.push(d[i].x);A.push([0,0,0,s[i].x,s[i].y,1,-d[i].y*s[i].x,-d[i].y*s[i].y]);b.push(d[i].y);}const n=8,aug=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(aug[r][c])>Math.abs(aug[mr][c]))mr=r;[aug[c],aug[mr]]=[aug[mr],aug[c]];if(Math.abs(aug[c][c])<1e-12)return null;for(let j=c;j<=n;j++)aug[c][j]/=aug[c][c];for(let r=0;r<n;r++){if(r===c)continue;const f=aug[r][c];for(let j=c;j<=n;j++)aug[r][j]-=f*aug[c][j];}}return aug.map(r=>r[8]).concat([1]);}
     function invertHomography(H){const[a,b,c,d,e,f,g,h,i]=H,det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-12)return null;const id=1/det;return[(e*i-f*h)*id,(c*h-b*i)*id,(b*f-c*e)*id,(f*g-d*i)*id,(a*i-c*g)*id,(c*d-a*f)*id,(d*h-e*g)*id,(b*g-a*h)*id,(a*e-b*d)*id];}
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
