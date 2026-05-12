@@ -218,7 +218,7 @@
             const url=URL.createObjectURL(blob);
             const a=document.createElement('a');
             a.href=url;
-            a.download='FreePDFShoot_test.jpg';
+            a.download=`FreePDFShoot_${Date.now()}.jpg`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -226,142 +226,31 @@
             savedPages.push(blob);updatePageCounter();
             currentStep='saved';statusDiv.textContent='✅ JPEG сохранён! Проверьте галерею.';
             statusDiv.className='status-bar ready';
-            actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;
+            actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="saveJPEG()">📥 JPEG (${savedPages.length})</button>`;
             resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='JPEG сохранён. Откройте, чтобы проверить качество.';
         },'image/jpeg',0.92);
     }
-    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):enhanceContrast(tmp);}
+    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):tmp;}
     function toGray(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=4){const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;d[i]=d[i+1]=d[i+2]=g;}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
-    function enhanceContrast(cvs){
-        const ctx=cvs.getContext('2d');
-        const imgData=ctx.getImageData(0,0,cvs.width,cvs.height);
-        const data=imgData.data;
-        let min=255,max=0;
-        for(let i=0;i<data.length;i+=4){
-            if(data[i]===0&&data[i+1]===0&&data[i+2]===0) continue;
-            const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
-            if(gray<min) min=gray;
-            if(gray>max) max=gray;
-        }
-        if(max<=min) return cvs;
-        const range=max-min||1;
-        for(let i=0;i<data.length;i+=4){
-            if(data[i]===0&&data[i+1]===0&&data[i+2]===0) continue;
-            const gray=data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114;
-            const factor=(gray-min)/range;
-            const newGray=Math.round(factor*255);
-            const ratio=gray>1?newGray/gray:1;
-            data[i]=Math.min(255,Math.round(data[i]*ratio));
-            data[i+1]=Math.min(255,Math.round(data[i+1]*ratio));
-            data[i+2]=Math.min(255,Math.round(data[i+2]*ratio));
-        }
-        ctx.putImageData(imgData,0,0);
-        return cvs;
-    }
     function computeHomography(s,d){const A=[],b=[];for(let i=0;i<4;i++){A.push([s[i].x,s[i].y,1,0,0,0,-d[i].x*s[i].x,-d[i].x*s[i].y]);b.push(d[i].x);A.push([0,0,0,s[i].x,s[i].y,1,-d[i].y*s[i].x,-d[i].y*s[i].y]);b.push(d[i].y);}const n=8,aug=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(aug[r][c])>Math.abs(aug[mr][c]))mr=r;[aug[c],aug[mr]]=[aug[mr],aug[c]];if(Math.abs(aug[c][c])<1e-12)return null;for(let j=c;j<=n;j++)aug[c][j]/=aug[c][c];for(let r=0;r<n;r++){if(r===c)continue;const f=aug[r][c];for(let j=c;j<=n;j++)aug[r][j]-=f*aug[c][j];}}return aug.map(r=>r[8]).concat([1]);}
     function invertHomography(H){const[a,b,c,d,e,f,g,h,i]=H,det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-12)return null;const id=1/det;return[(e*i-f*h)*id,(c*h-b*i)*id,(b*f-c*e)*id,(f*g-d*i)*id,(a*i-c*g)*id,(c*d-a*f)*id,(d*h-e*g)*id,(b*g-a*h)*id,(a*e-b*d)*id];}
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
     function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPages.length}`;}
-    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;}}
+    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="saveJPEG()">📥 JPEG (${savedPages.length})</button>`;}}
+    function saveJPEG(){
+        if(!savedPages.length){statusDiv.textContent='Нет страниц.';return;}
+        const lastBlob=savedPages[savedPages.length-1];
+        const url=URL.createObjectURL(lastBlob);
+        const a=document.createElement('a');
+        a.href=url;
+        a.download=`FreePDFShoot_${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        statusDiv.textContent='✅ JPEG сохранён!';
+    }
     function resetToNewFrame(){canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';updateLiveButtons();pageVisible = true; liveViewActive = true; startLiveView();}
-
-    async function savePDF() {
-        if (savedPages.length === 0) { statusDiv.textContent = 'Нет страниц.'; return; }
-        statusDiv.textContent = 'Создаю PDF...';
-        try {
-            const pdfBytes = await generatePDF(savedPages);
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = 'FreePDFShoot.pdf'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-            statusDiv.textContent = '✅ PDF сохранён!'; statusDiv.className = 'status-bar ready';
-        } catch (err) { console.error(err); statusDiv.textContent = 'Ошибка создания PDF.'; statusDiv.className = 'status-bar error'; }
-    }
-
-    function encodeAscii85(data) {
-        let result = '', group = 0, count = 0;
-        for (let i = 0; i < data.length; i++) {
-            group = group * 256 + data[i]; count++;
-            if (count === 4) {
-                if (group === 0) { result += 'z'; }
-                else { let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple; }
-                group = 0; count = 0;
-            }
-        }
-        if (count > 0) { for (let j = count; j < 4; j++) group *= 256; let tuple = ''; for (let j = 3; j >= 0; j--) { const digit = group % 85; tuple = String.fromCharCode(33 + digit) + tuple; group = Math.floor(group / 85); } result += tuple.substring(0, count + 1); }
-        return result + '~>';
-    }
-
-    async function generatePDF(pages) {
-        const images = [];
-        for (const blob of pages) {
-            const buf = await blob.arrayBuffer();
-            images.push({ data: new Uint8Array(buf), dims: null });
-        }
-        for (const img of images) img.dims = getJPEGDimensions(img.data);
-        const pageW = 595, pageH = 842;
-        const parts = [], offsets = [];
-        let objNum = 1;
-        const imgObjNums = [], pageObjNums = [];
-        function addText(str) { parts.push(new TextEncoder().encode(str)); }
-        addText('%PDF-1.4\n');
-        for (const img of images) {
-            const ascii85 = encodeAscii85(img.data);
-            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
-            imgObjNums.push(objNum);
-            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCII85Decode /DCTDecode] /Length ${ascii85.length} >>\nstream\n${ascii85}\nendstream\nendobj\n`);
-            objNum++;
-        }
-        const kids = [];
-        for (let i = 0; i < images.length; i++) {
-            const img = images[i];
-            const scale = Math.min((pageW - 40) / img.dims.width, (pageH - 40) / img.dims.height);
-            const w = img.dims.width * scale, h = img.dims.height * scale;
-            const x = (pageW - w) / 2, y = (pageH - h) / 2;
-            const cont = `q ${w} 0 0 ${h} ${x} ${pageH - y - h} cm /Im${imgObjNums[i]} Do Q`;
-            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
-            pageObjNums.push(objNum);
-            addText(`${objNum} 0 obj\n<< /Type /Page /Parent ${objNum + 2} 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${objNum + 1} 0 R /Resources << /XObject << /Im${imgObjNums[i]} ${imgObjNums[i]} 0 R >> >> >>\nendobj\n`);
-            objNum++;
-            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
-            addText(`${objNum} 0 obj\n<< /Length ${cont.length} >>\nstream\n${cont}\nendstream\nendobj\n`);
-            objNum++;
-            kids.push(pageObjNums[i]);
-        }
-        const kidsStr = kids.map(k => `${k} 0 R`).join(' ');
-        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
-        const pagesObjNum = objNum;
-        addText(`${objNum} 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${kids.length} >>\nendobj\n`);
-        objNum++;
-        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
-        const catalogObjNum = objNum;
-        addText(`${objNum} 0 obj\n<< /Type /Catalog /Pages ${pagesObjNum} 0 R >>\nendobj\n`);
-        objNum++;
-        const xrefPos = parts.reduce((acc, p) => acc + p.length, 0);
-        addText(`xref\n0 ${objNum}\n0000000000 65535 f \n`);
-        for (const off of offsets) addText(`${String(off).padStart(10, '0')} 00000 n \n`);
-        addText(`trailer\n<< /Size ${objNum} /Root ${catalogObjNum} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
-        const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
-        const result = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const part of parts) { result.set(part, offset); offset += part.length; }
-        return result;
-    }
-
-    function getJPEGDimensions(data) {
-        let offset = 0;
-        if (data[0] !== 0xFF || data[1] !== 0xD8) return { width: 800, height: 600 };
-        offset += 2;
-        while (offset < data.length) {
-            if (data[offset] !== 0xFF) break;
-            const marker = data[offset + 1];
-            if (marker === 0xC0 || marker === 0xC2) {
-                return { width: (data[offset+7]<<8)|data[offset+8], height: (data[offset+5]<<8)|data[offset+6] };
-            }
-            const length = (data[offset+2]<<8)|data[offset+3];
-            offset += 2 + length;
-        }
-        return { width: 800, height: 600 };
-    }
 
     function fullCleanup() {
         liveViewActive = false; pageVisible = false;
