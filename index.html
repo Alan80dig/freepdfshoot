@@ -35,7 +35,7 @@
     </style>
 </head>
 <body>
-<div class="viewfinder" id="viewfinder"><video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas></div>
+<div class="viewfinder"><video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas></div>
 <div class="ui-overlay">
     <div class="header"><h1>FreePDFShoot</h1><div class="sub">Бесплатный • Приватный • Без серверов</div></div>
     <div class="page-counter" id="pageCounter">Страниц: 0</div>
@@ -63,6 +63,7 @@
     let lensMode = 'full';
     let longPressTimer = null, longPressTriggered = false;
     let liveZoom = 1, lastPinchDist = 0, bwMode = false;
+    let liveViewActive = false;
 
     function handleAction() {
         switch (currentStep) {
@@ -90,7 +91,7 @@
                 statusDiv.textContent = 'Наведите камеру. Pinch-to-zoom.';
                 statusDiv.className = 'status-bar ready';
                 actionArea.innerHTML = `<button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
-                startLiveView();
+                liveViewActive = true; startLiveView();
                 return;
             } catch (err) { if (err.name === 'NotAllowedError') break; }
         }
@@ -101,17 +102,19 @@
     function toggleBW() { bwMode = !bwMode; }
     function startLiveView() {
         const drawLive = () => {
-            if (currentStep !== 'ready') return;
+            if (!liveViewActive) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.scale(liveZoom, liveZoom); ctx.translate(-canvas.width/2, -canvas.height/2);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height); ctx.restore();
-            if (bwMode) {
-                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                for (let i = 0; i < imgData.data.length; i += 4) {
-                    const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
-                    imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
-                }
-                ctx.putImageData(imgData, 0, 0);
+            if (bwMode && video.readyState >= 2) {
+                try {
+                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    for (let i = 0; i < imgData.data.length; i += 4) {
+                        const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
+                        imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                } catch(e) {}
             }
             requestAnimationFrame(drawLive);
         };
@@ -125,6 +128,7 @@
     function onLiveTouchEnd(e){ if(e.touches.length<2) lastPinchDist=0; }
 
     function freezeFrame() {
+        liveViewActive = false;
         canvas.removeEventListener('touchstart',onLiveTouchStart); canvas.removeEventListener('touchmove',onLiveTouchMove); canvas.removeEventListener('touchend',onLiveTouchEnd);
         ctx.save(); ctx.translate(canvas.width/2,canvas.height/2); ctx.scale(liveZoom,liveZoom); ctx.translate(-canvas.width/2,-canvas.height/2);
         ctx.drawImage(video,0,0,canvas.width,canvas.height); ctx.restore();
@@ -162,9 +166,9 @@
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
     function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPages.length}`;}
     function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;}}
-    function resetToNewFrame(){canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';actionArea.innerHTML=`<button class="btn" onclick="toggleBW()">📄 ${bwMode?'Цвет':'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;startLiveView();}
+    function resetToNewFrame(){canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';actionArea.innerHTML=`<button class="btn" onclick="toggleBW()">📄 ${bwMode?'Цвет':'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;liveViewActive = true; startLiveView();}
 
-    // ── PDF-ГЕНЕРАТОР (БИНАРНЫЙ) ──
+    // ── PDF-ГЕНЕРАТОР (ASCII85 + JPEG) ──
     async function savePDF() {
         if (savedPages.length === 0) { statusDiv.textContent = 'Нет страниц.'; return; }
         statusDiv.textContent = 'Создаю PDF...';
@@ -175,6 +179,41 @@
             const a = document.createElement('a'); a.href = url; a.download = 'FreePDFShoot.pdf'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
             statusDiv.textContent = '✅ PDF сохранён!'; statusDiv.className = 'status-bar ready';
         } catch (err) { console.error(err); statusDiv.textContent = 'Ошибка создания PDF.'; statusDiv.className = 'status-bar error'; }
+    }
+
+    function encodeAscii85(data) {
+        let result = '';
+        let group = 0;
+        let count = 0;
+        for (let i = 0; i < data.length; i++) {
+            group = group * 256 + data[i];
+            count++;
+            if (count === 4) {
+                if (group === 0) { result += 'z'; }
+                else {
+                    let tuple = '';
+                    for (let j = 3; j >= 0; j--) {
+                        const digit = group % 85;
+                        tuple = String.fromCharCode(33 + digit) + tuple;
+                        group = Math.floor(group / 85);
+                    }
+                    result += tuple;
+                }
+                group = 0;
+                count = 0;
+            }
+        }
+        if (count > 0) {
+            for (let j = count; j < 4; j++) group *= 256;
+            let tuple = '';
+            for (let j = 3; j >= 0; j--) {
+                const digit = group % 85;
+                tuple = String.fromCharCode(33 + digit) + tuple;
+                group = Math.floor(group / 85);
+            }
+            result += tuple.substring(0, count + 1);
+        }
+        return result + '~>';
     }
 
     async function generatePDF(pages) {
@@ -194,24 +233,20 @@
         const imgObjNums = [];
         const pageObjNums = [];
 
-        // Текстовая часть PDF (заголовки объектов)
-        function addText(str) {
-            parts.push(new TextEncoder().encode(str));
-        }
+        function addText(str) { parts.push(new TextEncoder().encode(str)); }
 
         addText('%PDF-1.4\n');
 
         // Изображения
         for (const img of images) {
+            const ascii85 = encodeAscii85(img.data);
             offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
             imgObjNums.push(objNum);
-            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.data.length} >>\nstream\n`);
-            parts.push(img.data);
-            addText('\nendstream\nendobj\n');
+            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCII85Decode /DCTDecode] /Length ${ascii85.length} >>\nstream\n${ascii85}\nendstream\nendobj\n`);
             objNum++;
         }
 
-        // Страницы и содержимое
+        // Страницы
         const kids = [];
         for (let i = 0; i < images.length; i++) {
             const img = images[i];
@@ -254,7 +289,6 @@
         // Trailer
         addText(`trailer\n<< /Size ${objNum} /Root ${catalogObjNum} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
 
-        // Собираем всё в один Uint8Array
         const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
         const result = new Uint8Array(totalLength);
         let offset = 0;
