@@ -1,0 +1,17 @@
+{
+  "name": "FreePDFShoot – Приватный скан документов",
+  "short_name": "FreePDFShoot",
+  "description": "Бесплатный, приватный PDF-сканер без серверов и регистрации. Работает офлайн.",
+  "start_url": "/freepdfshoot/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232a6df4'/><text x='50' y='68' font-size='55' text-anchor='middle' fill='white'>📄</text></svg>",
+      "sizes": "100x100",
+      "type": "image/svg+xml"
+    }
+  ]
+}
