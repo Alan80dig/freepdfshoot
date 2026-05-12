@@ -89,10 +89,7 @@
                 currentStep = 'ready'; updatePageCounter();
                 statusDiv.textContent = 'Наведите камеру. Pinch-to-zoom.';
                 statusDiv.className = 'status-bar ready';
-                actionArea.innerHTML = `
-                    <button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button>
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
-                `;
+                actionArea.innerHTML = `<button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
                 startLiveView();
                 return;
             } catch (err) { if (err.name === 'NotAllowedError') break; }
@@ -123,224 +120,51 @@
         canvas.addEventListener('touchmove', onLiveTouchMove, { passive: false });
         canvas.addEventListener('touchend', onLiveTouchEnd);
     }
-
     function onLiveTouchStart(e) { if(e.touches.length===2) lastPinchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); }
-    function onLiveTouchMove(e) {
-        if(e.touches.length===2) {
-            e.preventDefault();
-            const dist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
-            if(lastPinchDist) liveZoom = Math.max(1, Math.min(5, liveZoom * (dist / lastPinchDist)));
-            lastPinchDist = dist;
-        }
-    }
-    function onLiveTouchEnd(e) { if(e.touches.length<2) lastPinchDist=0; }
+    function onLiveTouchMove(e){ if(e.touches.length===2){ e.preventDefault(); const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); if(lastPinchDist) liveZoom=Math.max(1,Math.min(5,liveZoom*(dist/lastPinchDist))); lastPinchDist=dist; } }
+    function onLiveTouchEnd(e){ if(e.touches.length<2) lastPinchDist=0; }
 
     function freezeFrame() {
-        canvas.removeEventListener('touchstart', onLiveTouchStart);
-        canvas.removeEventListener('touchmove', onLiveTouchMove);
-        canvas.removeEventListener('touchend', onLiveTouchEnd);
-        ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.scale(liveZoom, liveZoom); ctx.translate(-canvas.width/2, -canvas.height/2);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height); ctx.restore();
-        if (bwMode) {
-            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            for (let i = 0; i < imgData.data.length; i += 4) {
-                const gray = imgData.data[i]*0.299 + imgData.data[i+1]*0.587 + imgData.data[i+2]*0.114;
-                imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = gray;
-            }
-            ctx.putImageData(imgData, 0, 0);
-        }
-        frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const marginX = canvas.width * 0.25, marginY = canvas.height * 0.25;
-        corners = [
-            { x: marginX, y: marginY }, { x: canvas.width - marginX, y: marginY },
-            { x: canvas.width - marginX, y: canvas.height - marginY }, { x: marginX, y: canvas.height - marginY }
-        ];
-        lensActive = false; lensMode = 'full'; longPressTriggered = false; draggingCorner = -1;
-        if (longPressTimer) clearTimeout(longPressTimer);
-        currentStep = 'framing';
-        statusDiv.textContent = '📐 Расставьте маркеры.';
-        statusDiv.className = 'status-bar ready';
-        actionArea.innerHTML = `
-            <button class="btn secondary" onclick="resetCorners()">↺ Сброс</button>
-            <button class="btn accent" onclick="setFragmentMode()">🔍 Фрагмент</button>
-            <button class="btn" id="actionBtn" onclick="handleAction()">✓ Сохранить</button>
-        `;
-        canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
-        canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
-        canvas.addEventListener('touchend', onFramingTouchEnd);
-        canvas.addEventListener('dblclick', onDoubleTap);
+        canvas.removeEventListener('touchstart',onLiveTouchStart); canvas.removeEventListener('touchmove',onLiveTouchMove); canvas.removeEventListener('touchend',onLiveTouchEnd);
+        ctx.save(); ctx.translate(canvas.width/2,canvas.height/2); ctx.scale(liveZoom,liveZoom); ctx.translate(-canvas.width/2,-canvas.height/2);
+        ctx.drawImage(video,0,0,canvas.width,canvas.height); ctx.restore();
+        if(bwMode){ const d=ctx.getImageData(0,0,canvas.width,canvas.height); for(let i=0;i<d.data.length;i+=4){ const g=d.data[i]*0.299+d.data[i+1]*0.587+d.data[i+2]*0.114; d.data[i]=d.data[i+1]=d.data[i+2]=g; } ctx.putImageData(d,0,0); }
+        frozenImageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const mX=canvas.width*.25,mY=canvas.height*.25;
+        corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];
+        lensActive=false;lensMode='full';longPressTriggered=false;draggingCorner=-1;if(longPressTimer)clearTimeout(longPressTimer);
+        currentStep='framing';statusDiv.textContent='📐 Расставьте маркеры.';statusDiv.className='status-bar ready';
+        actionArea.innerHTML=`<button class="btn secondary" onclick="resetCorners()">↺ Сброс</button><button class="btn accent" onclick="setFragmentMode()">🔍 Фрагмент</button><button class="btn" id="actionBtn" onclick="handleAction()">✓ Сохранить</button>`;
+        canvas.addEventListener('touchstart',onFramingTouchStart,{passive:false});canvas.addEventListener('touchmove',onFramingTouchMove,{passive:false});canvas.addEventListener('touchend',onFramingTouchEnd);canvas.addEventListener('dblclick',onDoubleTap);
         drawFrozenScene();
     }
-
-    function setFragmentMode() {
-        lensMode = lensMode === 'full' ? 'fragment' : 'full';
-        const btn = document.querySelector('.btn.accent');
-        if (btn) btn.textContent = lensMode === 'full' ? '🔍 Фрагмент' : '📄 Весь документ';
+    function setFragmentMode(){lensMode=lensMode==='full'?'fragment':'full';const b=document.querySelector('.btn.accent');if(b)b.textContent=lensMode==='full'?'🔍 Фрагмент':'📄 Весь документ';}
+    function getCornersQuality(c){let p=0,g=0,b=0;for(let i=0;i<4;i++){const pr=c[(i+3)%4],cu=c[i],nx=c[(i+1)%4];const a=Math.abs(Math.atan2((pr.x-cu.x)*(nx.y-cu.y)-(pr.y-cu.y)*(nx.x-cu.x),(pr.x-cu.x)*(nx.x-cu.x)+(pr.y-cu.y)*(nx.y-cu.y))*180/Math.PI);if(a>88&&a<92)p++;else if(a>80&&a<100)g++;else b++;}if(p===4)return'perfect';if(b>0)return'bad';return g>=2?'good':'neutral';}
+    function drawFrozenScene(){
+        if(!frozenImageData)return;
+        ctx.putImageData(frozenImageData,0,0);ctx.fillStyle='rgba(0,0,0,0.4)';ctx.fillRect(0,0,canvas.width,canvas.height);
+        if(!corners)return;
+        const q=getCornersQuality(corners);const col=q==='perfect'?'#00ff88':q==='good'?'#ffdd57':q==='bad'?'#ff4444':'#2a6df4';
+        if(lensMode==='full'){const[TL,TR,BR,BL]=corners;ctx.save();ctx.beginPath();ctx.moveTo(TL.x,TL.y);ctx.lineTo(TR.x,TR.y);ctx.lineTo(BR.x,BR.y);ctx.lineTo(BL.x,BL.y);ctx.closePath();ctx.clip();ctx.putImageData(frozenImageData,0,0);ctx.restore();ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(TL.x,TL.y);ctx.lineTo(TR.x,TR.y);ctx.lineTo(BR.x,BR.y);ctx.lineTo(BL.x,BL.y);ctx.closePath();ctx.stroke();corners.forEach((c,i)=>{ctx.fillStyle=col;ctx.beginPath();ctx.arc(c.x,c.y,HANDLE_SIZE/2,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText(i+1,c.x,c.y+5);});}
+        if(lensActive){ctx.save();ctx.beginPath();ctx.arc(lensX,lensY,LENS_RADIUS,0,Math.PI*2);ctx.clip();ctx.drawImage(canvas,lensX-LENS_RADIUS*.8,lensY-LENS_RADIUS*.8,LENS_RADIUS*1.6,LENS_RADIUS*1.6,lensX-LENS_RADIUS,lensY-LENS_RADIUS,LENS_RADIUS*2,LENS_RADIUS*2);ctx.restore();ctx.beginPath();ctx.arc(lensX,lensY,LENS_RADIUS,0,Math.PI*2);ctx.strokeStyle=lensMode==='fragment'?'#8e44ad':'#fff';ctx.lineWidth=4;ctx.setLineDash(lensMode==='fragment'?[6,3]:[]);ctx.stroke();ctx.setLineDash([]);}
     }
-
-    function getCornersQuality(c) {
-        let perfect = 0, good = 0, bad = 0;
-        for (let i = 0; i < 4; i++) {
-            const prev = c[(i+3)%4], curr = c[i], next = c[(i+1)%4];
-            const v1 = { x: prev.x - curr.x, y: prev.y - curr.y }, v2 = { x: next.x - curr.x, y: next.y - curr.y };
-            const angle = Math.abs(Math.atan2(v1.x*v2.y - v1.y*v2.x, v1.x*v2.x + v1.y*v2.y) * 180 / Math.PI);
-            if (angle > 88 && angle < 92) perfect++;
-            else if (angle > 80 && angle < 100) good++;
-            else bad++;
-        }
-        if (perfect === 4) return 'perfect';
-        if (bad > 0) return 'bad';
-        return good >= 2 ? 'good' : 'neutral';
-    }
-
-    function drawFrozenScene() {
-        if (!frozenImageData) return;
-        ctx.putImageData(frozenImageData, 0, 0);
-        ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        if (!corners) return;
-        const quality = getCornersQuality(corners);
-        const color = quality === 'perfect' ? '#00ff88' : quality === 'good' ? '#ffdd57' : quality === 'bad' ? '#ff4444' : '#2a6df4';
-        if (lensMode === 'full') {
-            const [TL, TR, BR, BL] = corners;
-            ctx.save(); ctx.beginPath(); ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y); ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y); ctx.closePath(); ctx.clip(); ctx.putImageData(frozenImageData, 0, 0); ctx.restore();
-            ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y); ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y); ctx.closePath(); ctx.stroke();
-            corners.forEach((c, i) => {
-                ctx.fillStyle = color; ctx.beginPath(); ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-                ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(i+1, c.x, c.y+5);
-            });
-        }
-        if (lensActive) {
-            ctx.save(); ctx.beginPath(); ctx.arc(lensX, lensY, LENS_RADIUS, 0, Math.PI*2); ctx.clip();
-            ctx.drawImage(canvas, lensX-LENS_RADIUS*0.8, lensY-LENS_RADIUS*0.8, LENS_RADIUS*1.6, LENS_RADIUS*1.6, lensX-LENS_RADIUS, lensY-LENS_RADIUS, LENS_RADIUS*2, LENS_RADIUS*2);
-            ctx.restore();
-            ctx.beginPath(); ctx.arc(lensX, lensY, LENS_RADIUS, 0, Math.PI*2);
-            ctx.strokeStyle = lensMode === 'fragment' ? '#8e44ad' : '#fff';
-            ctx.lineWidth = 4; ctx.setLineDash(lensMode === 'fragment' ? [6,3] : []); ctx.stroke(); ctx.setLineDash([]);
-        }
-    }
-
-    function onFramingTouchStart(e) {
-        if (currentStep !== 'framing') return;
-        e.preventDefault(); e.stopPropagation();
-        const t = e.touches[0], rect = canvas.getBoundingClientRect();
-        const sx = (t.clientX - rect.left) * (canvas.width / rect.width), sy = (t.clientY - rect.top) * (canvas.height / rect.height);
-        longPressTriggered = false; if (longPressTimer) clearTimeout(longPressTimer);
-        if (lensActive && corners) {
-            for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
-                    longPressTimer = setTimeout(() => { longPressTriggered = true; draggingCorner = i; }, 300); return;
-                }
-            }
-        }
-        if (lensActive) { lensX = sx; lensY = sy; drawFrozenScene(); }
-        else if (corners) {
-            for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.3) { draggingCorner = i; return; }
-            }
-        }
-    }
-
-    function onFramingTouchMove(e) {
-        if (currentStep !== 'framing') return;
-        e.preventDefault(); e.stopPropagation();
-        const t = e.touches[0], rect = canvas.getBoundingClientRect();
-        const cx = (t.clientX - rect.left) * (canvas.width / rect.width), cy = (t.clientY - rect.top) * (canvas.height / rect.height);
-        if (longPressTimer && !longPressTriggered) { clearTimeout(longPressTimer); longPressTimer = null; }
-        if (lensActive && !longPressTriggered && draggingCorner < 0) { lensX = cx; lensY = cy; drawFrozenScene(); return; }
-        if (draggingCorner >= 0 && corners) {
-            corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, cx));
-            corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, cy));
-            drawFrozenScene();
-        }
-    }
-
-    function onFramingTouchEnd(e) { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } draggingCorner = -1; longPressTriggered = false; }
-
-    function onDoubleTap(e) {
-        if (currentStep !== 'framing') return;
-        e.preventDefault(); const rect = canvas.getBoundingClientRect();
-        lensActive = !lensActive;
-        if (lensActive) {
-            lensX = (e.clientX - rect.left) * (canvas.width / rect.width); lensY = (e.clientY - rect.top) * (canvas.height / rect.height);
-            statusDiv.textContent = '🔍 Лупа. Удерживайте маркер для захвата.';
-        } else statusDiv.textContent = '📐 Лупа выключена.';
-        drawFrozenScene();
-    }
-
-    function resetCorners() {
-        const mX = canvas.width * 0.25, mY = canvas.height * 0.25;
-        corners = [{ x: mX, y: mY }, { x: canvas.width - mX, y: mY }, { x: canvas.width - mX, y: canvas.height - mY }, { x: mX, y: canvas.height - mY }];
-        lensActive = false; lensMode = 'full'; draggingCorner = -1; longPressTriggered = false;
-        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-        const btn = document.querySelector('.btn.accent'); if (btn) btn.textContent = '🔍 Фрагмент';
-        drawFrozenScene(); statusDiv.textContent = '📐 Сброшено.';
-    }
-
-    function savePage() {
-        if (currentStep !== 'framing') return;
-        currentStep = 'saving';
-        canvas.removeEventListener('touchstart', onFramingTouchStart);
-        canvas.removeEventListener('touchmove', onFramingTouchMove);
-        canvas.removeEventListener('touchend', onFramingTouchEnd);
-        canvas.removeEventListener('dblclick', onDoubleTap);
-        let src = (lensMode === 'fragment' && lensActive)
-            ? [{x:lensX-LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY+LENS_RADIUS},{x:lensX-LENS_RADIUS,y:lensY+LENS_RADIUS}]
-            : corners;
-        if (!src) { statusDiv.textContent='Ошибка.'; currentStep='framing'; return; }
-        const rectified = rectifyDocument(src, frozenImageData);
-        if (!rectified) { statusDiv.textContent='Ошибка ракурса.'; currentStep='framing'; return; }
-        rectified.toBlob(blob => {
-            savedPages.push(blob); updatePageCounter();
-            currentStep = 'saved'; statusDiv.textContent='✅ Сохранено.'; statusDiv.className='status-bar ready';
-            actionArea.innerHTML = `<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;
-            resultsDiv.classList.add('visible'); document.getElementById('resTip').textContent='Нажмите PDF для сохранения файла.';
-        }, 'image/jpeg', 0.92);
-    }
-
-    function rectifyDocument(src, img) {
-        const [TL,TR,BR,BL] = src;
-        const tL = Math.hypot(TR.x-TL.x, TR.y-TL.y), bL = Math.hypot(BR.x-BL.x, BR.y-BL.y);
-        const lL = Math.hypot(BL.x-TL.x, BL.y-TL.y), rL = Math.hypot(BR.x-TR.x, BR.y-TR.y);
-        const oW = Math.round((tL+bL)/2), oH = Math.round((lL+rL)/2);
-        if (oW<20||oH<20) return null;
-        const max=2000; let s=1; if (Math.max(oW,oH)>max) s=max/Math.max(oW,oH);
-        const fW=Math.round(oW*s), fH=Math.round(oH*s);
-        const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];
-        const H=computeHomography(src,dst); if (!H) return null;
-        const Hi=invertHomography(H); if (!Hi) return null;
-        const tmp=document.createElement('canvas'); tmp.width=fW; tmp.height=fH;
-        const tc=tmp.getContext('2d'), idata=tc.createImageData(fW,fH);
-        for (let y=0;y<fH;y++) for (let x=0;x<fW;x++) {
-            const p=applyHomography(Hi,x,y), sx=Math.round(p.x), sy=Math.round(p.y);
-            if (sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height) {
-                const si=(sy*canvas.width+sx)*4, di=(y*fW+x)*4;
-                idata.data[di]=img.data[si]; idata.data[di+1]=img.data[si+1]; idata.data[di+2]=img.data[si+2]; idata.data[di+3]=255;
-            }
-        }
-        tc.putImageData(idata,0,0);
-        return bwMode ? toGray(tmp) : enhanceContrast(tmp);
-    }
-
-    function toGray(c) { const ctx=c.getContext('2d'), d=ctx.getImageData(0,0,c.width,c.height).data; for (let i=0;i<d.length;i+=4) { const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; d[i]=d[i+1]=d[i+2]=g; } ctx.putImageData(new ImageData(d,c.width,c.height),0,0); return c; }
-    function enhanceContrast(c) { const ctx=c.getContext('2d'), d=ctx.getImageData(0,0,c.width,c.height).data; let mn=255,mx=0; for (let i=0;i<d.length;i+=4) { if (d[i]===0&&d[i+1]===0&&d[i+2]===0) continue; const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; if(g<mn)mn=g; if(g>mx)mx=g; } if(mx<=mn)return c; const r=mx-mn; for (let i=0;i<d.length;i+=4) { if (d[i]===0&&d[i+1]===0&&d[i+2]===0) continue; const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; const f=(g-mn)/r; const ng=f*255; const rt=g>1?ng/g:1; d[i]=Math.min(255,d[i]*rt); d[i+1]=Math.min(255,d[i+1]*rt); d[i+2]=Math.min(255,d[i+2]*rt); } ctx.putImageData(new ImageData(d,c.width,c.height),0,0); return c; }
+    function onFramingTouchStart(e){if(currentStep!=='framing')return;e.preventDefault();e.stopPropagation();const t=e.touches[0],r=canvas.getBoundingClientRect();const sx=(t.clientX-r.left)*(canvas.width/r.width),sy=(t.clientY-r.top)*(canvas.height/r.height);longPressTriggered=false;if(longPressTimer)clearTimeout(longPressTimer);if(lensActive&&corners){for(let i=0;i<corners.length;i++){if(Math.hypot(sx-corners[i].x,sy-corners[i].y)<HANDLE_SIZE*1.5){longPressTimer=setTimeout(()=>{longPressTriggered=true;draggingCorner=i;},300);return;}}}if(lensActive){lensX=sx;lensY=sy;drawFrozenScene();}else if(corners){for(let i=0;i<corners.length;i++){if(Math.hypot(sx-corners[i].x,sy-corners[i].y)<HANDLE_SIZE*1.3){draggingCorner=i;return;}}}}
+    function onFramingTouchMove(e){if(currentStep!=='framing')return;e.preventDefault();e.stopPropagation();const t=e.touches[0],r=canvas.getBoundingClientRect();const cx=(t.clientX-r.left)*(canvas.width/r.width),cy=(t.clientY-r.top)*(canvas.height/r.height);if(longPressTimer&&!longPressTriggered){clearTimeout(longPressTimer);longPressTimer=null;}if(lensActive&&!longPressTriggered&&draggingCorner<0){lensX=cx;lensY=cy;drawFrozenScene();return;}if(draggingCorner>=0&&corners){corners[draggingCorner].x=Math.max(0,Math.min(canvas.width,cx));corners[draggingCorner].y=Math.max(0,Math.min(canvas.height,cy));drawFrozenScene();}}
+    function onFramingTouchEnd(e){if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}draggingCorner=-1;longPressTriggered=false;}
+    function onDoubleTap(e){if(currentStep!=='framing')return;e.preventDefault();const r=canvas.getBoundingClientRect();lensActive=!lensActive;if(lensActive){lensX=(e.clientX-r.left)*(canvas.width/r.width);lensY=(e.clientY-r.top)*(canvas.height/r.height);statusDiv.textContent='🔍 Лупа.';}else statusDiv.textContent='📐 Лупа выключена.';drawFrozenScene();}
+    function resetCorners(){const mX=canvas.width*.25,mY=canvas.height*.25;corners=[{x:mX,y:mY},{x:canvas.width-mX,y:mY},{x:canvas.width-mX,y:canvas.height-mY},{x:mX,y:canvas.height-mY}];lensActive=false;lensMode='full';draggingCorner=-1;longPressTriggered=false;if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}const b=document.querySelector('.btn.accent');if(b)b.textContent='🔍 Фрагмент';drawFrozenScene();statusDiv.textContent='📐 Сброшено.';}
+    function savePage(){if(currentStep!=='framing')return;currentStep='saving';canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);let src=(lensMode==='fragment'&&lensActive)?[{x:lensX-LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY-LENS_RADIUS},{x:lensX+LENS_RADIUS,y:lensY+LENS_RADIUS},{x:lensX-LENS_RADIUS,y:lensY+LENS_RADIUS}]:corners;if(!src){statusDiv.textContent='Ошибка.';currentStep='framing';return;}const rectified=rectifyDocument(src,frozenImageData);if(!rectified){statusDiv.className='status-bar error';statusDiv.textContent='Ошибка ракурса. Поправьте маркеры.';currentStep='framing';return;}rectified.toBlob(blob=>{savedPages.push(blob);updatePageCounter();currentStep='saved';statusDiv.textContent='✅ Сохранено.';statusDiv.className='status-bar ready';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;resultsDiv.classList.add('visible');document.getElementById('resTip').textContent='Нажмите PDF для сохранения.';},'image/jpeg',0.92);}
+    function rectifyDocument(src,img){const[TL,TR,BR,BL]=src;const tL=Math.hypot(TR.x-TL.x,TR.y-TL.y),bL=Math.hypot(BR.x-BL.x,BR.y-BL.y),lL=Math.hypot(BL.x-TL.x,BL.y-TL.y),rL=Math.hypot(BR.x-TR.x,BR.y-TR.y);const oW=Math.round((tL+bL)/2),oH=Math.round((lL+rL)/2);if(oW<20||oH<20)return null;const max=2000;let s=1;if(Math.max(oW,oH)>max)s=max/Math.max(oW,oH);const fW=Math.round(oW*s),fH=Math.round(oH*s);const dst=[{x:0,y:0},{x:fW,y:0},{x:fW,y:fH},{x:0,y:fH}];const H=computeHomography(src,dst);if(!H)return null;const Hi=invertHomography(H);if(!Hi)return null;const tmp=document.createElement('canvas');tmp.width=fW;tmp.height=fH;const tc=tmp.getContext('2d'),idata=tc.createImageData(fW,fH);for(let y=0;y<fH;y++)for(let x=0;x<fW;x++){const p=applyHomography(Hi,x,y),sx=Math.round(p.x),sy=Math.round(p.y);if(sx>=0&&sx<canvas.width&&sy>=0&&sy<canvas.height){const si=(sy*canvas.width+sx)*4,di=(y*fW+x)*4;idata.data[di]=img.data[si];idata.data[di+1]=img.data[si+1];idata.data[di+2]=img.data[si+2];idata.data[di+3]=255;}}tc.putImageData(idata,0,0);return bwMode?toGray(tmp):enhanceContrast(tmp);}
+    function toGray(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=4){const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;d[i]=d[i+1]=d[i+2]=g;}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
+    function enhanceContrast(c){const ctx=c.getContext('2d'),d=ctx.getImageData(0,0,c.width,c.height).data;let mn=255,mx=0;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;if(g<mn)mn=g;if(g>mx)mx=g;}if(mx<=mn)return c;const r=mx-mn;for(let i=0;i<d.length;i+=4){if(d[i]===0&&d[i+1]===0&&d[i+2]===0)continue;const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;const f=(g-mn)/r,ng=f*255,rt=g>1?ng/g:1;d[i]=Math.min(255,d[i]*rt);d[i+1]=Math.min(255,d[i+1]*rt);d[i+2]=Math.min(255,d[i+2]*rt);}ctx.putImageData(new ImageData(d,c.width,c.height),0,0);return c;}
     function computeHomography(s,d){const A=[],b=[];for(let i=0;i<4;i++){A.push([s[i].x,s[i].y,1,0,0,0,-d[i].x*s[i].x,-d[i].x*s[i].y]);b.push(d[i].x);A.push([0,0,0,s[i].x,s[i].y,1,-d[i].y*s[i].x,-d[i].y*s[i].y]);b.push(d[i].y);}const n=8,aug=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let mr=c;for(let r=c+1;r<n;r++)if(Math.abs(aug[r][c])>Math.abs(aug[mr][c]))mr=r;[aug[c],aug[mr]]=[aug[mr],aug[c]];if(Math.abs(aug[c][c])<1e-12)return null;for(let j=c;j<=n;j++)aug[c][j]/=aug[c][c];for(let r=0;r<n;r++){if(r===c)continue;const f=aug[r][c];for(let j=c;j<=n;j++)aug[r][j]-=f*aug[c][j];}}return aug.map(r=>r[8]).concat([1]);}
     function invertHomography(H){const[a,b,c,d,e,f,g,h,i]=H,det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-12)return null;const id=1/det;return[(e*i-f*h)*id,(c*h-b*i)*id,(b*f-c*e)*id,(f*g-d*i)*id,(a*i-c*g)*id,(c*d-a*f)*id,(d*h-e*g)*id,(b*g-a*h)*id,(a*e-b*d)*id];}
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
-
     function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPages.length}`;}
     function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;}}
-    function resetToNewFrame(){
-        canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);
-        canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);
-        frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');
-        if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}
-        currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';
-        actionArea.innerHTML = `<button class="btn" onclick="toggleBW()">📄 ${bwMode ? 'Цвет' : 'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
-        startLiveView();
-    }
+    function resetToNewFrame(){canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);frozenImageData=null;corners=null;draggingCorner=-1;lensActive=false;lensMode='full';resultsDiv.classList.remove('visible');if(longPressTimer){clearTimeout(longPressTimer);longPressTimer=null;}currentStep='ready';statusDiv.textContent='Наведите камеру.';statusDiv.className='status-bar ready';actionArea.innerHTML=`<button class="btn" onclick="toggleBW()">📄 ${bwMode?'Цвет':'Ч/Б'}</button><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;startLiveView();}
 
-    // ── PDF-ГЕНЕРАТОР (исправленный) ──
+    // ── PDF-ГЕНЕРАТОР (БИНАРНЫЙ) ──
     async function savePDF() {
         if (savedPages.length === 0) { statusDiv.textContent = 'Нет страниц.'; return; }
         statusDiv.textContent = 'Создаю PDF...';
@@ -349,11 +173,8 @@
             const blob = new Blob([pdfBytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a'); a.href = url; a.download = 'FreePDFShoot.pdf'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-            statusDiv.textContent = '✅ PDF сохранён!';
-        } catch (err) {
-            console.error(err);
-            statusDiv.textContent = 'Ошибка создания PDF.';
-        }
+            statusDiv.textContent = '✅ PDF сохранён!'; statusDiv.className = 'status-bar ready';
+        } catch (err) { console.error(err); statusDiv.textContent = 'Ошибка создания PDF.'; statusDiv.className = 'status-bar error'; }
     }
 
     async function generatePDF(pages) {
@@ -362,79 +183,86 @@
             const buf = await blob.arrayBuffer();
             images.push({ data: new Uint8Array(buf), dims: null });
         }
-        // Определяем размеры JPEG
         for (const img of images) {
             img.dims = getJPEGDimensions(img.data);
         }
 
         const pageW = 595, pageH = 842;
-        let pdf = '%PDF-1.4\n';
+        const parts = [];
         const offsets = [];
         let objNum = 1;
-        const imgObjs = [];
-        const pageObjs = [];
+        const imgObjNums = [];
+        const pageObjNums = [];
+
+        // Текстовая часть PDF (заголовки объектов)
+        function addText(str) {
+            parts.push(new TextEncoder().encode(str));
+        }
+
+        addText('%PDF-1.4\n');
 
         // Изображения
         for (const img of images) {
-            offsets.push(pdf.length);
-            pdf += `${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.data.length} >>\nstream\n`;
-            // Вставляем бинарные данные JPEG
-            const before = pdf.length;
-            pdf += ' '.repeat(img.data.length);
-            // Исправляем: вставляем бинарные данные через массив
-            const pdfBytes = new TextEncoder().encode(pdf);
-            const result = new Uint8Array(pdfBytes.length);
-            result.set(pdfBytes);
-            // Вставляем JPEG данные на место
-            result.set(img.data, before);
-            pdf = new TextDecoder('latin1').decode(result);
-            pdf += '\nendstream\nendobj\n';
-            imgObjs.push(objNum);
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            imgObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.data.length} >>\nstream\n`);
+            parts.push(img.data);
+            addText('\nendstream\nendobj\n');
             objNum++;
         }
 
         // Страницы и содержимое
+        const kids = [];
         for (let i = 0; i < images.length; i++) {
             const img = images[i];
             const scale = Math.min((pageW - 40) / img.dims.width, (pageH - 40) / img.dims.height);
             const w = img.dims.width * scale, h = img.dims.height * scale;
             const x = (pageW - w) / 2, y = (pageH - h) / 2;
-            const cont = `q ${w} 0 0 ${h} ${x} ${pageH - y - h} cm /Im${imgObjs[i]} Do Q`;
+            const cont = `q ${w} 0 0 ${h} ${x} ${pageH - y - h} cm /Im${imgObjNums[i]} Do Q`;
 
-            offsets.push(pdf.length);
-            pdf += `${objNum} 0 obj\n<< /Type /Page /Parent ${objNum + 2} 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${objNum + 1} 0 R /Resources << /XObject << /Im${imgObjs[i]} ${imgObjs[i]} 0 R >> >> >>\nendobj\n`;
-            pageObjs.push(objNum);
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            pageObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /Page /Parent ${objNum + 2} 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${objNum + 1} 0 R /Resources << /XObject << /Im${imgObjNums[i]} ${imgObjNums[i]} 0 R >> >> >>\nendobj\n`);
             objNum++;
 
-            offsets.push(pdf.length);
-            pdf += `${objNum} 0 obj\n<< /Length ${cont.length} >>\nstream\n${cont}\nendstream\nendobj\n`;
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            addText(`${objNum} 0 obj\n<< /Length ${cont.length} >>\nstream\n${cont}\nendstream\nendobj\n`);
             objNum++;
+            kids.push(pageObjNums[i]);
         }
 
         // Каталог страниц
-        const kids = pageObjs.map(p => `${p} 0 R`).join(' ');
-        offsets.push(pdf.length);
-        pdf += `${objNum} 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageObjs.length} >>\nendobj\n`;
-        const pagesObj = objNum;
+        const kidsStr = kids.map(k => `${k} 0 R`).join(' ');
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const pagesObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${kids.length} >>\nendobj\n`);
         objNum++;
 
         // Каталог
-        offsets.push(pdf.length);
-        pdf += `${objNum} 0 obj\n<< /Type /Catalog /Pages ${pagesObj} 0 R >>\nendobj\n`;
-        const catalogObj = objNum;
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const catalogObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Catalog /Pages ${pagesObjNum} 0 R >>\nendobj\n`);
         objNum++;
 
         // Cross-reference table
-        const xrefPos = pdf.length;
-        pdf += `xref\n0 ${objNum}\n0000000000 65535 f \n`;
+        const xrefPos = parts.reduce((acc, p) => acc + p.length, 0);
+        addText(`xref\n0 ${objNum}\n0000000000 65535 f \n`);
         for (const off of offsets) {
-            pdf += `${String(off).padStart(10, '0')} 00000 n \n`;
+            addText(`${String(off).padStart(10, '0')} 00000 n \n`);
         }
 
         // Trailer
-        pdf += `trailer\n<< /Size ${objNum} /Root ${catalogObj} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+        addText(`trailer\n<< /Size ${objNum} /Root ${catalogObjNum} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
 
-        return new TextEncoder().encode(pdf);
+        // Собираем всё в один Uint8Array
+        const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const part of parts) {
+            result.set(part, offset);
+            offset += part.length;
+        }
+        return result;
     }
 
     function getJPEGDimensions(data) {
