@@ -348,10 +348,10 @@
             actionArea.innerHTML = `
                 <button class="btn secondary" onclick="resetToNewFrame()">📸 Снять ещё</button>
                 <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                <button class="btn" onclick="printAllPages()">🖨 PDF (${savedPages.length})</button>
+                <button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>
             `;
-            resultsDiv.classList.add('visible'); document.getElementById('resTip').textContent='Нажмите PDF для сохранения.';
-        }, 'image/jpeg', 0.95);
+            resultsDiv.classList.add('visible'); document.getElementById('resTip').textContent='Нажмите PDF для сохранения файла.';
+        }, 'image/jpeg', 0.92);
     }
 
     function rectifyDocument(srcPoints, imageData) {
@@ -385,7 +385,7 @@
     function applyHomography(H,x,y){const d=H[6]*x+H[7]*y+H[8];return{x:(H[0]*x+H[1]*y+H[2])/d,y:(H[3]*x+H[4]*y+H[5])/d};}
 
     function updatePageCounter(){pageCounter.textContent=`Страниц: ${savedPages.length}`;}
-    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="printAllPages()">🖨 PDF (${savedPages.length})</button>`;}}
+    function removeLastPage(){if(!savedPages.length)return;savedPages.pop();updatePageCounter();if(!savedPages.length){resultsDiv.classList.remove('visible');resetToNewFrame();}else{statusDiv.textContent='🗑 Удалено.';actionArea.innerHTML=`<button class="btn secondary" onclick="resetToNewFrame()">📸 Снять</button><button class="btn danger" onclick="removeLastPage()">🗑</button><button class="btn" onclick="savePDF()">📄 PDF (${savedPages.length})</button>`;}}
     function resetToNewFrame(){
         canvas.removeEventListener('touchstart',onFramingTouchStart);canvas.removeEventListener('touchmove',onFramingTouchMove);
         canvas.removeEventListener('touchend',onFramingTouchEnd);canvas.removeEventListener('dblclick',onDoubleTap);
@@ -395,58 +395,249 @@
         updateLiveButtons(); startLiveView();
     }
 
-    function printAllPages() {
+    // ── PDF-ГЕНЕРАТОР ──
+    async function savePDF() {
         if (savedPages.length === 0) {
             statusDiv.textContent = 'Нет сохранённых страниц.';
             statusDiv.className = 'status-bar error';
             return;
         }
 
-        const printWindow = window.open('', '_blank', 'width=800,height=600');
-        
-        let imagesHTML = '';
-        savedPages.forEach((blob, index) => {
-            imagesHTML += `<img src="${URL.createObjectURL(blob)}" style="width:100%;max-height:100vh;object-fit:contain;display:block;page-break-after:${index < savedPages.length - 1 ? 'always' : 'auto'};background:white;" onload="this.dataset.loaded='true';">`;
-        });
-
-        printWindow.document.write(`
-            <html>
-            <head>
-                <title>FreePDFShoot – Документ</title>
-                <style>
-                    body { margin: 0; padding: 0; font-family: sans-serif; background: white; }
-                    img { display: block; background: white; }
-                    @media print {
-                        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-                        body { background: white; }
-                        img { max-height: none; height: auto; page-break-after: always; background: white; }
-                        img:last-child { page-break-after: auto; }
-                    }
-                </style>
-            </head>
-            <body>${imagesHTML}</body>
-            </html>
-        `);
-        printWindow.document.close();
-
-        const tryPrint = () => {
-            const images = printWindow.document.querySelectorAll('img');
-            const allLoaded = Array.from(images).every(img => img.complete && img.naturalWidth > 0);
-            
-            if (allLoaded) {
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        printWindow.print();
-                    });
-                });
-            } else {
-                setTimeout(tryPrint, 200);
-            }
-        };
-        
-        setTimeout(tryPrint, 300);
-        statusDiv.textContent = '🖨 Открыто окно печати. Выберите «Сохранить как PDF».';
+        statusDiv.textContent = 'Создаю PDF...';
         statusDiv.className = 'status-bar ready';
+
+        try {
+            const pdfBytes = await generatePDF(savedPages);
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'FreePDFShoot_документ.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            statusDiv.textContent = '✅ PDF сохранён!';
+            statusDiv.className = 'status-bar ready';
+        } catch (err) {
+            console.error(err);
+            statusDiv.textContent = 'Ошибка создания PDF.';
+            statusDiv.className = 'status-bar error';
+        }
+    }
+
+    async function generatePDF(pages) {
+        // Минимальный PDF-генератор
+        const pdf = {
+            objects: [],
+            offset: 0
+        };
+
+        // Конвертируем Blob в Uint8Array
+        const imageDataArray = [];
+        for (const blob of pages) {
+            const arrayBuffer = await blob.arrayBuffer();
+            imageDataArray.push(new Uint8Array(arrayBuffer));
+        }
+
+        // Создаём объекты изображений
+        const imageObjects = [];
+        for (let i = 0; i < imageDataArray.length; i++) {
+            const data = imageDataArray[i];
+            const obj = {
+                index: pdf.objects.length + 1,
+                data: data,
+                stream: null
+            };
+            imageObjects.push(obj);
+            pdf.objects.push(obj);
+        }
+
+        // Страницы
+        const pageObjects = [];
+        const pageWidth = 595;  // A4 ширина в pt
+        const pageHeight = 842; // A4 высота в pt
+
+        for (let i = 0; i < imageObjects.length; i++) {
+            // Получаем размеры изображения из JPEG
+            const img = imageObjects[i];
+            const dimensions = getJPEGDimensions(img.data);
+            
+            // Вычисляем масштаб
+            const scale = Math.min(
+                (pageWidth - 40) / dimensions.width,
+                (pageHeight - 40) / dimensions.height
+            );
+            const w = dimensions.width * scale;
+            const h = dimensions.height * scale;
+            const x = (pageWidth - w) / 2;
+            const y = (pageHeight - h) / 2;
+
+            const pageObj = {
+                index: pdf.objects.length + 1,
+                imageIndex: img.index,
+                width: w,
+                height: h,
+                x: x,
+                y: y
+            };
+            pageObjects.push(pageObj);
+            pdf.objects.push(pageObj);
+        }
+
+        // Каталог страниц
+        const pagesObj = {
+            index: pdf.objects.length + 1,
+            kids: pageObjects.map(p => p.index)
+        };
+        pdf.objects.push(pagesObj);
+
+        // Генерация PDF
+        let pdfContent = '';
+        const offsets = [];
+
+        // Header
+        pdfContent += '%PDF-1.4\n';
+
+        // Объекты
+        for (const obj of pdf.objects) {
+            offsets.push(pdfContent.length);
+            pdfContent += `${obj.index} 0 obj\n`;
+
+            if (obj.data) {
+                // Изображение
+                const stream = obj.data;
+                pdfContent += `<< /Type /XObject /Subtype /Image /Width ${getJPEGDimensions(stream).width} /Height ${getJPEGDimensions(stream).height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${stream.length} >>\n`;
+                pdfContent += `stream\n`;
+                // Вставляем бинарные данные как есть (это JPEG)
+                pdfContent += new TextDecoder('latin1').decode(stream);
+                pdfContent += `\nendstream\n`;
+            } else if (obj.kids) {
+                // Каталог страниц
+                pdfContent += `<< /Type /Pages /Kids [${obj.kids.join(' 0 R ')} 0 R] /Count ${obj.kids.length} >>\n`;
+            } else if (obj.imageIndex !== undefined) {
+                // Страница
+                pdfContent += `<< /Type /Page /Parent ${pagesObj.index} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents << /Length 44 >>\n`;
+                pdfContent += `/Resources << /XObject << /Im${obj.imageIndex} ${obj.imageIndex} 0 R >> >> >>\n`;
+            }
+            pdfContent += `endobj\n`;
+        }
+
+        // Cross-reference table
+        const xrefOffset = pdfContent.length;
+        pdfContent += `xref\n`;
+        pdfContent += `0 ${pdf.objects.length + 1}\n`;
+        pdfContent += `0000000000 65535 f \n`;
+        for (const offset of offsets) {
+            pdfContent += `${String(offset).padStart(10, '0')} 00000 n \n`;
+        }
+
+        // Trailer
+        pdfContent += `trailer\n`;
+        pdfContent += `<< /Size ${pdf.objects.length + 1} /Root << /Type /Catalog /Pages ${pagesObj.index} 0 R >> >>\n`;
+        pdfContent += `startxref\n`;
+        pdfContent += `${xrefOffset}\n`;
+        pdfContent += `%%EOF`;
+
+        // Конвертируем обратно в бинарный формат
+        const encoder = new TextEncoder();
+        const textBytes = encoder.encode(pdfContent);
+        
+        // Собираем финальный PDF
+        const parts = [textBytes];
+        let textOffset = 0;
+        
+        // Находим позиции бинарных данных и заменяем их
+        for (const obj of pdf.objects) {
+            if (obj.data) {
+                const streamStart = pdfContent.indexOf('stream\n', textOffset) + 7;
+                const streamEnd = pdfContent.indexOf('\nendstream', streamStart);
+                textOffset = streamEnd + 11;
+            }
+        }
+        
+        // Упрощённый подход: создаём PDF заново с корректными бинарными вставками
+        const finalParts = [];
+        finalParts.push(encoder.encode('%PDF-1.4\n'));
+        
+        const objectOffsets = [];
+        for (const obj of pdf.objects) {
+            objectOffsets.push(finalParts.reduce((acc, part) => acc + part.length, 0));
+            
+            finalParts.push(encoder.encode(`${obj.index} 0 obj\n`));
+            
+            if (obj.data) {
+                const dims = getJPEGDimensions(obj.data);
+                finalParts.push(encoder.encode(`<< /Type /XObject /Subtype /Image /Width ${dims.width} /Height ${dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${obj.data.length} >>\n`));
+                finalParts.push(encoder.encode(`stream\n`));
+                finalParts.push(obj.data);
+                finalParts.push(encoder.encode(`\nendstream\n`));
+            } else if (obj.kids) {
+                finalParts.push(encoder.encode(`<< /Type /Pages /Kids [${obj.kids.join(' 0 R ')} 0 R] /Count ${obj.kids.length} >>\n`));
+            } else if (obj.imageIndex !== undefined) {
+                const cont = `q ${obj.width} 0 0 ${obj.height} ${obj.x} ${pageHeight - obj.y - obj.height} cm /Im${obj.imageIndex} Do Q`;
+                finalParts.push(encoder.encode(`<< /Type /Page /Parent ${pagesObj.index} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${obj.index + 1} 0 R /Resources << /XObject << /Im${obj.imageIndex} ${obj.imageIndex} 0 R >> >> >>\n`));
+                finalParts.push(encoder.encode(`endobj\n`));
+                
+                // Содержимое страницы
+                objectOffsets.push(finalParts.reduce((acc, part) => acc + part.length, 0));
+                finalParts.push(encoder.encode(`${obj.index + 1} 0 obj\n`));
+                finalParts.push(encoder.encode(`<< /Length ${cont.length} >>\n`));
+                finalParts.push(encoder.encode(`stream\n`));
+                finalParts.push(encoder.encode(cont));
+                finalParts.push(encoder.encode(`\nendstream\n`));
+            }
+            finalParts.push(encoder.encode(`endobj\n`));
+        }
+
+        // Cross-reference table
+        const xrefStart = finalParts.reduce((acc, part) => acc + part.length, 0);
+        finalParts.push(encoder.encode(`xref\n`));
+        finalParts.push(encoder.encode(`0 ${pdf.objects.length + pageObjects.length + 1}\n`));
+        finalParts.push(encoder.encode(`0000000000 65535 f \n`));
+        for (const off of objectOffsets) {
+            finalParts.push(encoder.encode(`${String(off).padStart(10, '0')} 00000 n \n`));
+        }
+
+        // Trailer
+        finalParts.push(encoder.encode(`trailer\n`));
+        finalParts.push(encoder.encode(`<< /Size ${pdf.objects.length + pageObjects.length + 1} /Root << /Type /Catalog /Pages ${pagesObj.index} 0 R >> >>\n`));
+        finalParts.push(encoder.encode(`startxref\n`));
+        finalParts.push(encoder.encode(`${xrefStart}\n`));
+        finalParts.push(encoder.encode(`%%EOF`));
+
+        // Собираем все части в один Uint8Array
+        const totalLength = finalParts.reduce((acc, part) => acc + part.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const part of finalParts) {
+            result.set(part, offset);
+            offset += part.length;
+        }
+
+        return result;
+    }
+
+    function getJPEGDimensions(data) {
+        let offset = 0;
+        if (data[0] !== 0xFF || data[1] !== 0xD8) {
+            return { width: 800, height: 600 };
+        }
+        offset += 2;
+        while (offset < data.length) {
+            if (data[offset] !== 0xFF) break;
+            const marker = data[offset + 1];
+            if (marker === 0xC0 || marker === 0xC2) {
+                const height = (data[offset + 5] << 8) | data[offset + 6];
+                const width = (data[offset + 7] << 8) | data[offset + 8];
+                return { width, height };
+            }
+            const length = (data[offset + 2] << 8) | data[offset + 3];
+            offset += 2 + length;
+        }
+        return { width: 800, height: 600 };
     }
 
     window.addEventListener('beforeunload',()=>{if(stream)stream.getTracks().forEach(t=>t.stop());savedPages.forEach(b=>URL.revokeObjectURL(b));});
