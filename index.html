@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/freepdfshoot/manifest.json">
     <title>FreePDFShoot – Приватный скан документов</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -95,7 +96,8 @@
         for (let c of configs) {
             try {
                 stream = await navigator.mediaDevices.getUserMedia(c);
-                video.srcObject = stream; await video.play();
+                video.srcObject = stream;
+                await video.play();
                 canvas.width = video.videoWidth || canvas.clientWidth;
                 canvas.height = video.videoHeight || canvas.clientHeight;
                 currentStep = 'ready'; updatePageCounter();
@@ -113,41 +115,15 @@
     function toggleBW() { bwMode = !bwMode; }
     function startLiveView() {
         let framePending = false;
-        
         const drawLive = () => {
-            if (!liveViewActive || !pageVisible || !stream) {
-                framePending = false;
-                return;
-            }
-            
-            if (framePending) {
-                requestAnimationFrame(drawLive);
-                return;
-            }
+            if (!liveViewActive || !pageVisible || !stream) { framePending = false; return; }
+            if (framePending) { requestAnimationFrame(drawLive); return; }
             framePending = true;
-
-            if (canvas.width < 10 || canvas.height < 10) {
-                framePending = false;
-                requestAnimationFrame(drawLive);
-                return;
-            }
-
+            if (canvas.width < 10 || canvas.height < 10) { framePending = false; requestAnimationFrame(drawLive); return; }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.scale(liveZoom, liveZoom);
-            ctx.translate(-canvas.width / 2, -canvas.height / 2);
-            
-            try {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            } catch(e) {
-                framePending = false;
-                requestAnimationFrame(drawLive);
-                return;
-            }
-            
+            ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.scale(liveZoom, liveZoom); ctx.translate(-canvas.width/2, -canvas.height/2);
+            try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); } catch(e) { framePending = false; requestAnimationFrame(drawLive); return; }
             ctx.restore();
-            
             if (bwMode && video.readyState >= 2 && canvas.width > 10 && canvas.height > 10) {
                 try {
                     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -158,11 +134,9 @@
                     ctx.putImageData(imgData, 0, 0);
                 } catch(e) {}
             }
-            
             framePending = false;
             setTimeout(() => requestAnimationFrame(drawLive), 33);
         };
-        
         drawLive();
         canvas.addEventListener('touchstart', onLiveTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onLiveTouchMove, { passive: false });
@@ -311,14 +285,10 @@
         return { width: 800, height: 600 };
     }
 
-    // ── КУЛЬТУРНАЯ ОЧИСТКА ПАМЯТИ ──
     function fullCleanup() {
         liveViewActive = false;
         pageVisible = false;
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-            stream = null;
-        }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         video.srcObject = null;
         if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
         canvas.removeEventListener('touchstart', onLiveTouchStart);
@@ -339,6 +309,12 @@
         else { pageVisible = true; if (currentStep === 'ready') startLiveView(); }
     });
     window.addEventListener('beforeunload', fullCleanup);
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/freepdfshoot/sw.js')
+            .then(() => console.log('SW registered'))
+            .catch(() => console.log('SW registration failed'));
+    }
 </script>
 </body>
 </html>
