@@ -188,13 +188,31 @@
         canvas.removeEventListener('touchcancel', onFramingTouchEnd);
     }
 
-    function toCanvasCoords(clientX, clientY) {
+       function toCanvasCoords(clientX, clientY) {
         var r = canvas.getBoundingClientRect();
-        var scaleX = canvas.width / r.width;
-        var scaleY = canvas.height / r.height;
-        var cssX = clientX - r.left;
-        var cssY = clientY - r.top;
-        return { x: cssX * scaleX, y: cssY * scaleY };
+        var canvasRatio = canvas.width / canvas.height;
+        var containerRatio = r.width / r.height;
+        var drawWidth, drawHeight, offsetX, offsetY;
+
+        if (canvasRatio > containerRatio) {
+            drawWidth = r.width;
+            drawHeight = r.width / canvasRatio;
+            offsetX = 0;
+            offsetY = (r.height - drawHeight) / 2;
+        } else {
+            drawHeight = r.height;
+            drawWidth = r.height * canvasRatio;
+            offsetX = (r.width - drawWidth) / 2;
+            offsetY = 0;
+        }
+
+        var drawX = clientX - r.left - offsetX;
+        var drawY = clientY - r.top - offsetY;
+
+        return {
+            x: (drawX / drawWidth) * canvas.width,
+            y: (drawY / drawHeight) * canvas.height
+        };
     }
 
     function findCornerUnderFinger(cx, cy) {
