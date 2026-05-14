@@ -31,7 +31,6 @@
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
         .btn.danger { background: rgba(180,40,40,0.85); color: #fff; flex: 0.5; }
         .btn.save { background: #4caf50; color: #fff; flex: 0.5; }
-        .btn.straighten { background: #ff8800; color: #fff; flex: 0.5; }
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
         .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
@@ -76,10 +75,14 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
+    // Трансформации: зум, панорама, вращение
     let framingZoom = 1;
     let framingPanX = 0, framingPanY = 0;
+    let framingRotation = 0;
+    // Для двух пальцев
     let lastPinchDist = 0;
     let lastPinchMidX = 0, lastPinchMidY = 0;
+    let lastPinchAngle = 0;
 
     function handleAction() {
         if (currentStep === 'saving' || currentStep === 'generating') return;
@@ -113,7 +116,7 @@
                 {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
             ];
             draggingCorner = -1;
-            framingZoom = 1; framingPanX = 0; framingPanY = 0;
+            framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
             currentStep = 'framing';
             statusDiv.classList.add('hidden');
             updateUI();
@@ -130,7 +133,7 @@
         originalImage = null;
         corners = null;
         draggingCorner = -1;
-        framingZoom = 1; framingPanX = 0; framingPanY = 0;
+        framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
         resultsDiv.classList.remove('visible');
         currentStep = 'ready';
         statusDiv.textContent = 'Нажмите «Снять» для запуска камеры';
@@ -159,7 +162,6 @@
                 actionArea.classList.add('transparent');
                 actionArea.innerHTML = `
                     <button class="btn secondary" onclick="resetCrop()">↺ Сброс</button>
-                    <button class="btn straighten" onclick="autoStraighten()">🔄 Авто</button>
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
                 `;
                 break;
@@ -203,16 +205,24 @@
     function drawFrozenScene() {
         if (!frozenImageData) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Рисуем с трансформациями
         ctx.save();
         ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
+        ctx.rotate(framingRotation);
         ctx.scale(framingZoom, framingZoom);
         ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore();
+        
+        // Затемнение
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
         if (!corners) return;
         const [TL, TR, BR, BL] = corners;
+        
+        // Вырезаем область документа
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
@@ -220,15 +230,20 @@
         ctx.closePath(); ctx.clip();
         ctx.save();
         ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
+        ctx.rotate(framingRotation);
         ctx.scale(framingZoom, framingZoom);
         ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore(); ctx.restore();
+        
+        // Рамка
         ctx.strokeStyle = '#2a6df4'; ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.stroke();
+        
+        // Маркеры
         [TL, TR, BR, BL].forEach((c, i) => {
             ctx.fillStyle = '#2a6df4'; ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
@@ -249,6 +264,7 @@
             lastPinchDist = Math.hypot(x2 - x1, y2 - y1);
             lastPinchMidX = (x1 + x2) / 2;
             lastPinchMidY = (y1 + y2) / 2;
+            lastPinchAngle = Math.atan2(y2 - y1, x2 - x1);
             return;
         }
         e.preventDefault(); e.stopPropagation();
@@ -275,19 +291,28 @@
             const dist = Math.hypot(x2 - x1, y2 - y1);
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            
             if (lastPinchDist && lastPinchMidX) {
+                // Зум
                 const scale = dist / lastPinchDist;
                 const newZoom = Math.max(1, Math.min(5, framingZoom * scale));
+                // Панорама
                 framingPanX += (midX - lastPinchMidX);
                 framingPanY += (midY - lastPinchMidY);
                 const maxPan = canvas.width * (newZoom - 1) / 2;
                 framingPanX = Math.max(-maxPan, Math.min(maxPan, framingPanX));
                 framingPanY = Math.max(-maxPan, Math.min(maxPan, framingPanY));
                 framingZoom = newZoom;
+                // Вращение
+                if (lastPinchAngle) {
+                    framingRotation += angle - lastPinchAngle;
+                }
             }
             lastPinchDist = dist;
             lastPinchMidX = midX;
             lastPinchMidY = midY;
+            lastPinchAngle = angle;
             drawFrozenScene();
             return;
         }
@@ -301,13 +326,13 @@
         drawFrozenScene();
     }
     function onFramingTouchEnd(e) {
-        if (e.touches.length < 2) { lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0; }
+        if (e.touches.length < 2) { lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0; lastPinchAngle = 0; }
         draggingCorner = -1;
     }
 
     function resetCrop() {
-        framingZoom = 1; framingPanX = 0; framingPanY = 0;
-        lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0;
+        framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
+        lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0; lastPinchAngle = 0;
         const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
         corners = [
             {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
@@ -316,111 +341,56 @@
         drawFrozenScene();
     }
 
-        // ── АВТО-ВЫРАВНИВАНИЕ ──
-    function autoStraighten() {
-        if (!frozenImageData || !originalImage || currentStep !== 'framing') return;
-        
-        currentStep = 'generating';
+    function cropAndSave() {
+        if (currentStep !== 'framing') return;
+        currentStep = 'saving';
         updateUI();
-        progressOverlay.classList.add('visible');
-        progressText.textContent = 'Выравниваю...';
-        progressFill.style.width = '50%';
-        
-        // Находим границы документа по яркости
-        const data = frozenImageData.data;
-        const w = canvas.width, h = canvas.height;
-        
-        // Ищем верхнюю границу (первая яркая строка)
-        let topEdge = null;
-        for (let y = 0; y < h; y++) {
-            let rowBright = 0;
-            for (let x = 0; x < w; x++) {
-                const idx = (y * w + x) * 4;
-                rowBright += data[idx] + data[idx+1] + data[idx+2];
-            }
-            rowBright /= w;
-            if (rowBright > 100) {
-                topEdge = [];
-                for (let x = 0; x < w; x += 10) {
-                    for (let dy = 0; dy < 20; dy++) {
-                        const yy = y + dy;
-                        if (yy >= h) break;
-                        const idx = (yy * w + x) * 4;
-                        if (data[idx] + data[idx+1] + data[idx+2] > 300) {
-                            topEdge.push({x, y: yy});
-                            break;
-                        }
-                    }
-                }
-                break;
-            }
-        }
-        
-        if (!topEdge || topEdge.length < 5) {
-            progressOverlay.classList.remove('visible');
+        unbindFramingEvents();
+        const [TL, TR, BR, BL] = corners;
+        const minX = Math.max(0, Math.min(TL.x, BL.x));
+        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
+        const minY = Math.max(0, Math.min(TL.y, TR.y));
+        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
+        const cropW = maxX - minX;
+        const cropH = maxY - minY;
+        if (cropW < 10 || cropH < 10) {
+            statusDiv.textContent = 'Область слишком мала.';
+            statusDiv.className = 'status-bar error';
+            statusDiv.classList.remove('hidden');
             currentStep = 'framing';
+            bindFramingEvents();
             updateUI();
             return;
         }
-        
-        // Вычисляем угол наклона по верхней границе
-        const first = topEdge[0];
-        const last = topEdge[topEdge.length - 1];
-        const angle = Math.atan2(last.y - first.y, last.x - first.x);
-        
-        if (Math.abs(angle) < 0.01) {
-            progressOverlay.classList.remove('visible');
-            currentStep = 'framing';
-            updateUI();
-            return;
-        }
-        
-        // Поворачиваем originalImage
-        const diag = Math.ceil(Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height));
+        const invScale = 1 / displayScale;
         const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = diag;
-        tmpCanvas.height = diag;
+        tmpCanvas.width = Math.round(cropW * invScale);
+        tmpCanvas.height = Math.round(cropH * invScale);
         const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.translate(diag / 2, diag / 2);
-        tmpCtx.rotate(-angle);
-        tmpCtx.drawImage(originalImage, -canvas.width / 2, -canvas.height / 2);
-        
-        // Обновляем originalImage
-        const newImg = new Image();
+        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         tmpCanvas.toBlob(blob => {
-            const url = URL.createObjectURL(blob);
-            newImg.onload = () => {
-                URL.revokeObjectURL(url);
-                originalImage = newImg;
-                
-                // Пересчитываем displayScale для нового изображения
-                const MAX_DIM = 1500;
-                displayScale = 1;
-                if (newImg.naturalWidth > MAX_DIM || newImg.naturalHeight > MAX_DIM) {
-                    displayScale = MAX_DIM / Math.max(newImg.naturalWidth, newImg.naturalHeight);
-                }
-                
-                canvas.width = Math.round(newImg.naturalWidth * displayScale);
-                canvas.height = Math.round(newImg.naturalHeight * displayScale);
-                ctx.drawImage(newImg, 0, 0, canvas.width, canvas.height);
-                frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
-                corners = [
-                    {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
-                    {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
-                ];
-                framingZoom = 1; framingPanX = 0; framingPanY = 0;
-                
-                progressOverlay.classList.remove('visible');
+            if (!blob) {
+                statusDiv.textContent = 'Ошибка обработки.';
+                statusDiv.className = 'status-bar error';
+                statusDiv.classList.remove('hidden');
                 currentStep = 'framing';
+                bindFramingEvents();
                 updateUI();
-                drawFrozenScene();
-            };
-            newImg.src = url;
+                return;
+            }
+            const url = URL.createObjectURL(blob);
+            savedPages.push({ url, blob });
+            updatePageCounter();
+            frozenImageData = null;
+            originalImage = null;
+            corners = null;
+            currentStep = 'saved';
+            updateUI();
+            resultsDiv.classList.add('visible');
+            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}.`;
         }, 'image/jpeg', 0.92);
     }
-    
+
     function updatePageCounter() { pageCounter.textContent = `Страниц: ${savedPages.length}`; }
 
     function removeLastPage() {
