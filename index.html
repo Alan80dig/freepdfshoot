@@ -15,15 +15,16 @@
         .viewfinder canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
         .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; }
         .ui-overlay > * { pointer-events: auto; }
-        .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; gap: 12px; }
+        .top-bar { padding: 12px 16px 0; }
+        .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .header { text-align: center; flex: 1; }
         .header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
         .page-counter { background: rgba(0,0,0,0.6); color: #fff; font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; white-space: nowrap; backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); }
-        .status-bar { text-align: center; padding: 4px 20px; font-size: 0.75rem; color: #4caf50; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 20px; }
+        .status-bar { text-align: center; padding: 2px 20px 6px; font-size: 0.7rem; color: #4caf50; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 16px; }
         .status-bar.error { color: #ff6b6b; }
         .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 15; padding: 0 12px 16px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: auto; background: rgba(0,0,0,0.5); }
         .action-area.transparent { background: rgba(0,0,0,0.3); }
-        .btn { display: block; flex: 1; min-width: 50px; padding: 10px 8px; font-size: 0.7rem; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; white-space: nowrap; }
+        .btn { display: block; flex: 1; min-width: 55px; padding: 12px 10px; font-size: 0.75rem; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; white-space: nowrap; }
         .btn:active { opacity: 0.85; }
         .btn:disabled { background: rgba(58,58,58,0.8); color: #999; cursor: not-allowed; }
         .btn.primary { background: #2a6df4; }
@@ -46,11 +47,13 @@
 </div>
 <div class="ui-overlay">
     <div class="top-bar">
-        <div class="page-counter" id="pageCounter">Страниц: 0</div>
-        <div class="header"><h1>FreePDFShoot</h1></div>
+        <div class="top-row">
+            <div class="page-counter" id="pageCounter">Страниц: 0</div>
+            <div class="header"><h1>FreePDFShoot</h1></div>
+        </div>
+        <div class="status-bar" id="status">Нажмите «Снять» для запуска камеры</div>
     </div>
     <div style="flex:1;"></div>
-    <div class="status-bar" id="status">Нажмите «Снять» для запуска камеры</div>
 </div>
 <div class="action-area" id="actionArea"><button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
 <script>
@@ -168,13 +171,11 @@
     }
 
     function bindFramingEvents() {
-        canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
         canvas.addEventListener('touchend', onFramingTouchEnd);
     }
     function unbindFramingEvents() {
-        canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
@@ -214,11 +215,11 @@
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        if (corners) {
-            for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
-                    draggingCorner = i; return;
-                }
+        if (!corners) return;
+        for (let i = 0; i < corners.length; i++) {
+            if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
+                draggingCorner = i;
+                return;
             }
         }
     }
