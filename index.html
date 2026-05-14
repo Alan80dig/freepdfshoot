@@ -28,6 +28,7 @@
         .btn:disabled { background: rgba(58,58,58,0.8); color: #999; cursor: not-allowed; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
         .btn.danger { background: rgba(180,40,40,0.85); color: #fff; flex: 0.5; }
+        .btn.save { background: #4caf50; color: #fff; flex: 0.5; }
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
         .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
@@ -73,12 +74,17 @@
     let originalImage = null;
     let displayScale = 1;
 
+    // Pinch-to-zoom при обрезке
+    let framingZoom = 1;
+    let framingPanX = 0, framingPanY = 0;
+    let lastPinchDist = 0;
+
     function handleAction() {
         if (currentStep === 'saving' || currentStep === 'generating') return;
         switch (currentStep) {
             case 'ready': cameraInput.click(); break;
             case 'framing': cropAndSave(); break;
-            case 'saved': resetToReady(); break;
+            case 'saved': cameraInput.click(); break;
         }
     }
 
@@ -105,8 +111,11 @@
                 {x:mX, y:canvas.height - mY}
             ];
             draggingCorner = -1;
+            framingZoom = 1;
+            framingPanX = 0;
+            framingPanY = 0;
             currentStep = 'framing';
-            statusDiv.textContent = '✂️ Расставьте маркеры для обрезки.';
+            statusDiv.textContent = '✂️ Расставьте маркеры. Pinch-to-zoom.';
             statusDiv.className = 'status-bar ready';
             updateUI();
             bindFramingEvents();
@@ -122,6 +131,9 @@
         corners = null;
         originalImage = null;
         draggingCorner = -1;
+        framingZoom = 1;
+        framingPanX = 0;
+        framingPanY = 0;
         resultsDiv.classList.remove('visible');
         currentStep = 'ready';
         statusDiv.textContent = 'Нажмите «Снять» для запуска камеры';
@@ -137,6 +149,7 @@
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
                     ${savedPages.length > 0 ? `
                         <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
+                        <button class="btn save" onclick="savePDF()">💾 Сохранить</button>
                         <button class="btn danger" onclick="clearAllPages()">🗑 Всё</button>
                     ` : ''}
                 `;
@@ -152,9 +165,10 @@
                 break;
             case 'saved':
                 actionArea.innerHTML = `
-                    <button class="btn secondary" onclick="resetToReady()">📸 Снять ещё</button>
+                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
+                    <button class="btn save" onclick="savePDF()">💾 Сохранить</button>
+                    <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
                 `;
                 break;
             case 'generating':
@@ -176,17 +190,30 @@
 
     function drawFrozenScene() {
         if (!frozenImageData) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(framingPanX, framingPanY);
+        ctx.scale(framingZoom, framingZoom);
         ctx.putImageData(frozenImageData, 0, 0);
+        ctx.restore();
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         if (!corners) return;
         const [TL, TR, BR, BL] = corners;
+        const scaleX = framingZoom;
+        const scaleY = framingZoom;
+        const panX = framingPanX;
+        const panY = framingPanY;
+        const sTL = {x: TL.x * scaleX + panX, y: TL.y * scaleY + panY};
+        const sTR = {x: TR.x * scaleX + panX, y: TR.y * scaleY + panY};
+        const sBR = {x: BR.x * scaleX + panX, y: BR.y * scaleY + panY};
+        const sBL = {x: BL.x * scaleX + panX, y: BL.y * scaleY + panY};
         ctx.save();
         ctx.beginPath();
-        ctx.moveTo(TL.x, TL.y);
-        ctx.lineTo(TR.x, TR.y);
-        ctx.lineTo(BR.x, BR.y);
-        ctx.lineTo(BL.x, BL.y);
+        ctx.moveTo(sTL.x, sTL.y);
+        ctx.lineTo(sTR.x, sTR.y);
+        ctx.lineTo(sBR.x, sBR.y);
+        ctx.lineTo(sBL.x, sBL.y);
         ctx.closePath();
         ctx.clip();
         ctx.putImageData(frozenImageData, 0, 0);
@@ -194,13 +221,13 @@
         ctx.strokeStyle = '#2a6df4';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(TL.x, TL.y);
-        ctx.lineTo(TR.x, TR.y);
-        ctx.lineTo(BR.x, BR.y);
-        ctx.lineTo(BL.x, BL.y);
+        ctx.moveTo(sTL.x, sTL.y);
+        ctx.lineTo(sTR.x, sTR.y);
+        ctx.lineTo(sBR.x, sBR.y);
+        ctx.lineTo(sBL.x, sBL.y);
         ctx.closePath();
         ctx.stroke();
-        corners.forEach((c, i) => {
+        [sTL, sTR, sBR, sBL].forEach((c, i) => {
             ctx.fillStyle = '#2a6df4';
             ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE / 2, 0, Math.PI * 2);
@@ -217,14 +244,24 @@
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
+        if (e.touches.length === 2) {
+            lastPinchDist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
+        const invScale = 1 / framingZoom;
+        const rx = (sx - framingPanX) * invScale;
+        const ry = (sy - framingPanY) * invScale;
         if (corners) {
             for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
+                if (Math.hypot(sx - (corners[i].x * framingZoom + framingPanX), sy - (corners[i].y * framingZoom + framingPanY)) < HANDLE_SIZE * 1.5) {
                     draggingCorner = i;
                     return;
                 }
@@ -232,19 +269,44 @@
         }
     }
     function onFramingTouchMove(e) {
+        if (currentStep !== 'framing') return;
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            if (lastPinchDist) {
+                const scale = dist / lastPinchDist;
+                const newZoom = Math.max(1, Math.min(5, framingZoom * scale));
+                framingPanX = (framingPanX - canvas.width/2) * (newZoom / framingZoom) + canvas.width/2;
+                framingPanY = (framingPanY - canvas.height/2) * (newZoom / framingZoom) + canvas.height/2;
+                framingZoom = newZoom;
+            }
+            lastPinchDist = dist;
+            drawFrozenScene();
+            return;
+        }
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
         e.stopPropagation();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
-        const cx = (t.clientX - r.left) * (canvas.width / r.width);
-        const cy = (t.clientY - r.top) * (canvas.height / r.height);
-        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, cx));
-        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, cy));
+        const sx = (t.clientX - r.left) * (canvas.width / r.width);
+        const sy = (t.clientY - r.top) * (canvas.height / r.height);
+        const invScale = 1 / framingZoom;
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, (sx - framingPanX) * invScale));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, (sy - framingPanY) * invScale));
         drawFrozenScene();
     }
-    function onFramingTouchEnd(e) { draggingCorner = -1; }
+    function onFramingTouchEnd(e) {
+        if (e.touches.length < 2) lastPinchDist = 0;
+        draggingCorner = -1;
+    }
 
     function resetCrop() {
+        framingZoom = 1;
+        framingPanX = 0;
+        framingPanY = 0;
         const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
         corners = [
             {x:mX, y:mY},
@@ -292,7 +354,7 @@
             statusDiv.className = 'status-bar ready';
             updateUI();
             resultsDiv.classList.add('visible');
-            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}. Можно отправить или добавить ещё.`;
+            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}. Можно сохранить, отправить или добавить ещё.`;
         }, 'image/jpeg', 0.92);
     }
 
@@ -318,6 +380,35 @@
         savedPages = [];
         updatePageCounter();
         resetToReady();
+    }
+
+    async function savePDF() {
+        if (savedPages.length === 0) return;
+        currentStep = 'generating';
+        updateUI();
+        progressOverlay.classList.add('visible');
+        try {
+            const blobs = savedPages.map(p => p.blob);
+            const blob = await generatePDFBlob(blobs);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'FreePDFShoot.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            statusDiv.textContent = '✅ PDF сохранён на телефон!';
+            statusDiv.className = 'status-bar ready';
+        } catch (err) {
+            console.error(err);
+            statusDiv.textContent = 'Ошибка создания PDF.';
+            statusDiv.className = 'status-bar error';
+        } finally {
+            progressOverlay.classList.remove('visible');
+            currentStep = 'saved';
+            updateUI();
+        }
     }
 
     async function sharePDF() {
