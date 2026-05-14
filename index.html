@@ -10,16 +10,15 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
-        body { display: flex; flex-direction: column; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        body { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
         .viewfinder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1; }
         .viewfinder canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-        .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; z-index: 10; pointer-events: none; }
-        .top-bar { padding: 12px 16px 0; pointer-events: auto; }
-        .top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .top-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; padding: 12px 16px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; }
+        .top-bar > * { pointer-events: auto; }
         .header { text-align: center; flex: 1; }
         .header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
         .page-counter { background: rgba(0,0,0,0.6); color: #fff; font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; white-space: nowrap; backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); }
-        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 11; padding: 0 12px 16px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: auto; background: rgba(0,0,0,0.5); }
+        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; padding: 0 12px 16px; display: flex; gap: 6px; flex-wrap: wrap; background: rgba(0,0,0,0.5); }
         .action-area.transparent { background: rgba(0,0,0,0.3); }
         .btn { display: block; flex: 1; min-width: 55px; padding: 12px 10px; font-size: 0.75rem; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; white-space: nowrap; }
         .btn:active { opacity: 0.85; }
@@ -36,22 +35,20 @@
     </style>
 </head>
 <body>
-<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
+<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
 <div class="viewfinder"><canvas id="canvas"></canvas></div>
 <div class="progress-overlay" id="progressOverlay">
     <div class="progress-text" id="progressText">Создаю PDF...</div>
     <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
 </div>
-<div class="ui-overlay">
-    <div class="top-bar">
-        <div class="top-row">
-            <div class="page-counter" id="pageCounter">Страниц: 0</div>
-            <div class="header"><h1>FreePDFShoot</h1></div>
-        </div>
-    </div>
+<div class="top-bar">
+    <div class="page-counter" id="pageCounter">Страниц: 0</div>
+    <div class="header"><h1>FreePDFShoot</h1></div>
 </div>
-<div class="action-area" id="actionArea"><button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
+<div class="action-area" id="actionArea"><button class="btn primary" id="actionBtn">📸 Снять</button></div>
+
 <script>
+(function() {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const actionArea = document.getElementById('actionArea');
@@ -69,6 +66,10 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
+
+    // Навешиваем обработчики здесь, а не в HTML
+    document.getElementById('actionBtn').addEventListener('click', handleAction);
+    cameraInput.addEventListener('change', onSystemPhoto);
 
     function handleAction() {
         if (currentStep === 'saving' || currentStep === 'generating') return;
@@ -114,10 +115,7 @@
     function resetToReady() {
         unbindFramingEvents();
         frozenImageData = null;
-        if (originalImage) {
-            originalImage.src = '';
-            originalImage = null;
-        }
+        if (originalImage) { originalImage.src = ''; originalImage = null; }
         corners = null;
         draggingCorner = -1;
         currentStep = 'ready';
@@ -127,23 +125,26 @@
 
     function updateUI() {
         actionArea.classList.remove('transparent');
+        const btn = document.getElementById('actionBtn');
+        // Снимаем старый обработчик
+        btn.removeEventListener('click', handleAction);
+        
         switch (currentStep) {
             case 'ready':
                 actionArea.innerHTML = `
-                    <button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button>
+                    <button class="btn primary" id="actionBtn">📸 Снять</button>
                     ${savedPages.length > 0 ? `
-                        <button class="btn secondary" onclick="sharePDF()">📤 (${savedPages.length})</button>
-                        <button class="btn save" onclick="savePDF()">💾</button>
-                        <button class="btn danger" onclick="clearAllPages()">🗑</button>
+                        <button class="btn secondary" id="shareBtn">📤 (${savedPages.length})</button>
+                        <button class="btn save" id="saveBtn">💾</button>
+                        <button class="btn danger" id="clearBtn">🗑</button>
                     ` : ''}
                 `;
                 break;
             case 'framing':
-                actionArea.classList.add('transparent');
                 actionArea.innerHTML = `
-                    <button class="btn secondary" onclick="resetCrop()">↺</button>
-                    <button class="btn danger" onclick="resetToReady()">↩</button>
-                    <button class="btn primary" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
+                    <button class="btn secondary" id="resetCropBtn">↺</button>
+                    <button class="btn danger" id="resetReadyBtn">↩</button>
+                    <button class="btn primary" id="actionBtn">✂️ Обрезать</button>
                 `;
                 break;
             case 'saving':
@@ -151,33 +152,56 @@
                 break;
             case 'saved':
                 actionArea.innerHTML = `
-                    <button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
-                    <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn save" onclick="savePDF()">💾</button>
-                    <button class="btn secondary" onclick="sharePDF()">📤 (${savedPages.length})</button>
+                    <button class="btn primary" id="actionBtn">📸 Снять ещё</button>
+                    <button class="btn danger" id="removeBtn">🗑</button>
+                    <button class="btn save" id="saveBtn">💾</button>
+                    <button class="btn secondary" id="shareBtn">📤 (${savedPages.length})</button>
                 `;
                 break;
             case 'generating':
                 actionArea.innerHTML = `<button class="btn primary" disabled>⏳ PDF...</button>`;
-                break;
+                return; // Не навешиваем обработчики
         }
+        
+        // Навешиваем новый обработчик на главную кнопку
+        const newBtn = document.getElementById('actionBtn');
+        if (newBtn && !newBtn.disabled) {
+            newBtn.addEventListener('click', handleAction);
+        }
+        // Навешиваем обработчики на дополнительные кнопки
+        const shareBtn = document.getElementById('shareBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const resetCropBtn = document.getElementById('resetCropBtn');
+        const resetReadyBtn = document.getElementById('resetReadyBtn');
+        const removeBtn = document.getElementById('removeBtn');
+        
+        if (shareBtn) shareBtn.addEventListener('click', sharePDF);
+        if (saveBtn) saveBtn.addEventListener('click', savePDF);
+        if (clearBtn) clearBtn.addEventListener('click', clearAllPages);
+        if (resetCropBtn) resetCropBtn.addEventListener('click', resetCrop);
+        if (resetReadyBtn) resetReadyBtn.addEventListener('click', resetToReady);
+        if (removeBtn) removeBtn.addEventListener('click', removeLastPage);
     }
 
     function bindFramingEvents() {
-        canvas.style.pointerEvents = 'auto';
-        canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
         canvas.addEventListener('touchend', onFramingTouchEnd);
         canvas.addEventListener('touchcancel', onFramingTouchEnd);
+        canvas.addEventListener('mousedown', onFramingMouseDown);
+        window.addEventListener('mousemove', onFramingMouseMove);
+        window.addEventListener('mouseup', onFramingMouseUp);
     }
+
     function unbindFramingEvents() {
-        canvas.style.pointerEvents = '';
-        canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
         canvas.removeEventListener('touchcancel', onFramingTouchEnd);
+        canvas.removeEventListener('mousedown', onFramingMouseDown);
+        window.removeEventListener('mousemove', onFramingMouseMove);
+        window.removeEventListener('mouseup', onFramingMouseUp);
     }
 
     function toCanvasCoords(clientX, clientY) {
@@ -231,8 +255,7 @@
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
-        e.preventDefault();
-        e.stopPropagation();
+        e.preventDefault(); e.stopPropagation();
         var touch = e.touches[0];
         var coords = toCanvasCoords(touch.clientX, touch.clientY);
         draggingCorner = findCornerUnderFinger(coords.x, coords.y);
@@ -240,21 +263,34 @@
 
     function onFramingTouchMove(e) {
         if (currentStep !== 'framing') return;
-        e.preventDefault();
-        e.stopPropagation();
+        e.preventDefault(); e.stopPropagation();
         if (draggingCorner < 0 || !corners) return;
         var touch = e.touches[0];
         var coords = toCanvasCoords(touch.clientX, touch.clientY);
-        var cx = Math.max(0, Math.min(canvas.width, coords.x));
-        var cy = Math.max(0, Math.min(canvas.height, coords.y));
-        corners[draggingCorner].x = cx;
-        corners[draggingCorner].y = cy;
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, coords.x));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, coords.y));
         drawFrozenScene();
     }
 
-    function onFramingTouchEnd(e) {
-        draggingCorner = -1;
+    function onFramingTouchEnd(e) { draggingCorner = -1; }
+
+    function onFramingMouseDown(e) {
+        if (currentStep !== 'framing') return;
+        e.preventDefault();
+        var coords = toCanvasCoords(e.clientX, e.clientY);
+        draggingCorner = findCornerUnderFinger(coords.x, coords.y);
     }
+
+    function onFramingMouseMove(e) {
+        if (draggingCorner < 0 || !corners) return;
+        e.preventDefault();
+        var coords = toCanvasCoords(e.clientX, e.clientY);
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, coords.x));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, coords.y));
+        drawFrozenScene();
+    }
+
+    function onFramingMouseUp(e) { draggingCorner = -1; }
 
     function resetCrop() {
         const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
@@ -300,10 +336,7 @@
             savedPages.push({ url, blob });
             updatePageCounter();
             frozenImageData = null;
-            if (originalImage) {
-                originalImage.src = '';
-                originalImage = null;
-            }
+            if (originalImage) { originalImage.src = ''; originalImage = null; }
             corners = null;
             currentStep = 'saved';
             updateUI();
@@ -317,11 +350,8 @@
         const item = savedPages.pop();
         URL.revokeObjectURL(item.url);
         updatePageCounter();
-        if (!savedPages.length) {
-            resetToReady();
-        } else {
-            updateUI();
-        }
+        if (!savedPages.length) resetToReady();
+        else updateUI();
     }
 
     function clearAllPages() {
@@ -348,9 +378,8 @@
             a.href = url; a.download = 'FreePDFShoot.pdf';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-        } catch (err) {
-            console.error(err);
-        } finally {
+        } catch (err) { console.error(err); }
+        finally {
             progressOverlay.classList.remove('visible');
             currentStep = 'saved';
             updateUI();
@@ -378,9 +407,8 @@
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 URL.revokeObjectURL(url);
             }
-        } catch (err) {
-            if (err.name !== 'AbortError') console.error(err);
-        } finally {
+        } catch (err) { if (err.name !== 'AbortError') console.error(err); }
+        finally {
             progressOverlay.classList.remove('visible');
             currentStep = 'saved';
             updateUI();
@@ -454,23 +482,21 @@
             const dims = { width: img.width, height: img.height };
             img.close();
             return dims;
-        } catch(e) {
-            return { width: 800, height: 600 };
-        }
+        } catch(e) { return { width: 800, height: 600 }; }
     }
 
     window.addEventListener('beforeunload', () => {
         savedPages.forEach(item => URL.revokeObjectURL(item.url));
         savedPages = [];
-        if (originalImage) {
-            originalImage.src = '';
-            originalImage = null;
-        }
+        if (originalImage) { originalImage.src = ''; originalImage = null; }
         frozenImageData = null;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.width = 0;
-        canvas.height = 0;
+        canvas.width = 0; canvas.height = 0;
     });
+
+    // Инициализация
+    updateUI();
+})();
 </script>
 </body>
 </html>
