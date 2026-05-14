@@ -53,7 +53,7 @@
         </div>
         <div class="status-bar" id="status">Нажмите «Снять» для запуска камеры</div>
     </div>
-    <div style="flex:1;"></div>
+    <div style="flex:1; pointer-events: none;"></div>
 </div>
 <div class="action-area" id="actionArea"><button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
 <script>
@@ -174,7 +174,6 @@
     }
 
     function bindFramingEvents() {
-        canvas.style.zIndex = '25';
         canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
@@ -182,7 +181,6 @@
         canvas.addEventListener('touchcancel', onFramingTouchEnd);
     }
     function unbindFramingEvents() {
-        canvas.style.zIndex = '';
         canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
