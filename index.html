@@ -31,6 +31,7 @@
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
         .btn.danger { background: rgba(180,40,40,0.85); color: #fff; flex: 0.5; }
         .btn.save { background: #4caf50; color: #fff; flex: 0.5; }
+        .btn.straighten { background: #ff8800; color: #fff; flex: 0.5; }
         .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
         .results.visible { display: block; }
         .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
@@ -158,6 +159,7 @@
                 actionArea.classList.add('transparent');
                 actionArea.innerHTML = `
                     <button class="btn secondary" onclick="resetCrop()">↺ Сброс</button>
+                    <button class="btn straighten" onclick="autoStraighten()">🔄 Авто</button>
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
                 `;
                 break;
@@ -314,116 +316,111 @@
         drawFrozenScene();
     }
 
-    function cropAndSave() {
-        if (currentStep !== 'framing') return;
-        currentStep = 'saving';
+        // ── АВТО-ВЫРАВНИВАНИЕ ──
+    function autoStraighten() {
+        if (!frozenImageData || !originalImage || currentStep !== 'framing') return;
+        
+        currentStep = 'generating';
         updateUI();
-        unbindFramingEvents();
-        const [TL, TR, BR, BL] = corners;
-        const minX = Math.max(0, Math.min(TL.x, BL.x));
-        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
-        const minY = Math.max(0, Math.min(TL.y, TR.y));
-        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
-        const cropW = maxX - minX;
-        const cropH = maxY - minY;
-        if (cropW < 10 || cropH < 10) {
-            statusDiv.textContent = 'Область слишком мала.';
-            statusDiv.className = 'status-bar error';
-            statusDiv.classList.remove('hidden');
+        progressOverlay.classList.add('visible');
+        progressText.textContent = 'Выравниваю...';
+        progressFill.style.width = '50%';
+        
+        // Находим границы документа по яркости
+        const data = frozenImageData.data;
+        const w = canvas.width, h = canvas.height;
+        
+        // Ищем верхнюю границу (первая яркая строка)
+        let topEdge = null;
+        for (let y = 0; y < h; y++) {
+            let rowBright = 0;
+            for (let x = 0; x < w; x++) {
+                const idx = (y * w + x) * 4;
+                rowBright += data[idx] + data[idx+1] + data[idx+2];
+            }
+            rowBright /= w;
+            if (rowBright > 100) {
+                topEdge = [];
+                for (let x = 0; x < w; x += 10) {
+                    for (let dy = 0; dy < 20; dy++) {
+                        const yy = y + dy;
+                        if (yy >= h) break;
+                        const idx = (yy * w + x) * 4;
+                        if (data[idx] + data[idx+1] + data[idx+2] > 300) {
+                            topEdge.push({x, y: yy});
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        
+        if (!topEdge || topEdge.length < 5) {
+            progressOverlay.classList.remove('visible');
             currentStep = 'framing';
-            bindFramingEvents();
             updateUI();
             return;
         }
         
-        const angle = Math.atan2(TR.y - TL.y, TR.x - TL.x);
-        const invScale = 1 / displayScale;
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = Math.round(cropW * invScale);
-        tmpCanvas.height = Math.round(cropH * invScale);
-        const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
+        // Вычисляем угол наклона по верхней границе
+        const first = topEdge[0];
+        const last = topEdge[topEdge.length - 1];
+        const angle = Math.atan2(last.y - first.y, last.x - first.x);
         
-        const saveBlob = (blob) => {
-            if (!blob) {
-                statusDiv.textContent = 'Ошибка обработки.';
-                statusDiv.className = 'status-bar error';
-                statusDiv.classList.remove('hidden');
-                currentStep = 'framing';
-                bindFramingEvents();
-                updateUI();
-                return;
-            }
-            const url = URL.createObjectURL(blob);
-            savedPages.push({ url, blob });
-            updatePageCounter();
-            frozenImageData = null;
-            originalImage = null;
-            corners = null;
-            currentStep = 'saved';
+        if (Math.abs(angle) < 0.01) {
+            progressOverlay.classList.remove('visible');
+            currentStep = 'framing';
             updateUI();
-            resultsDiv.classList.add('visible');
-            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}.`;
-        };
-        
-        if (Math.abs(angle) > 0.01) {
-            const w = tmpCanvas.width, h = tmpCanvas.height;
-            const diag = Math.ceil(Math.sqrt(w * w + h * h));
-            
-            // Шаг 1: Поворачиваем на -angle, чтобы выровнять
-            const rotatedCanvas = document.createElement('canvas');
-            rotatedCanvas.width = diag;
-            rotatedCanvas.height = diag;
-            const rctx = rotatedCanvas.getContext('2d');
-            rctx.translate(diag / 2, diag / 2);
-            rctx.rotate(-angle);
-            rctx.drawImage(tmpCanvas, -w / 2, -h / 2);
-            
-            // Шаг 2: Обрезаем прозрачный фон
-            const imgData = rctx.getImageData(0, 0, diag, diag);
-            const data = imgData.data;
-            let top = diag, bottom = 0, left = diag, right = 0;
-            for (let y = 0; y < diag; y++) {
-                for (let x = 0; x < diag; x++) {
-                    const idx = (y * diag + x) * 4;
-                    if (data[idx + 3] > 0) {
-                        if (y < top) top = y;
-                        if (y > bottom) bottom = y;
-                        if (x < left) left = x;
-                        if (x > right) right = x;
-                    }
-                }
-            }
-            const cropW2 = right - left + 1;
-            const cropH2 = bottom - top + 1;
-            
-            if (cropW2 > 0 && cropH2 > 0) {
-                // Вырезаем без фона
-                const croppedCanvas = document.createElement('canvas');
-                croppedCanvas.width = cropW2;
-                croppedCanvas.height = cropH2;
-                const cctx = croppedCanvas.getContext('2d');
-                cctx.putImageData(imgData, -left, -top, left, top, cropW2, cropH2);
-                
-                // Шаг 3: Поворачиваем обратно на +angle
-                const w2 = croppedCanvas.width, h2 = croppedCanvas.height;
-                const diag2 = Math.ceil(Math.sqrt(w2 * w2 + h2 * h2));
-                const finalCanvas = document.createElement('canvas');
-                finalCanvas.width = diag2;
-                finalCanvas.height = diag2;
-                const fctx = finalCanvas.getContext('2d');
-                fctx.translate(diag2 / 2, diag2 / 2);
-                fctx.rotate(angle);
-                fctx.drawImage(croppedCanvas, -w2 / 2, -h2 / 2);
-                finalCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
-            } else {
-                rotatedCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
-            }
-        } else {
-            tmpCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
+            return;
         }
+        
+        // Поворачиваем originalImage
+        const diag = Math.ceil(Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height));
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = diag;
+        tmpCanvas.height = diag;
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.translate(diag / 2, diag / 2);
+        tmpCtx.rotate(-angle);
+        tmpCtx.drawImage(originalImage, -canvas.width / 2, -canvas.height / 2);
+        
+        // Обновляем originalImage
+        const newImg = new Image();
+        tmpCanvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            newImg.onload = () => {
+                URL.revokeObjectURL(url);
+                originalImage = newImg;
+                
+                // Пересчитываем displayScale для нового изображения
+                const MAX_DIM = 1500;
+                displayScale = 1;
+                if (newImg.naturalWidth > MAX_DIM || newImg.naturalHeight > MAX_DIM) {
+                    displayScale = MAX_DIM / Math.max(newImg.naturalWidth, newImg.naturalHeight);
+                }
+                
+                canvas.width = Math.round(newImg.naturalWidth * displayScale);
+                canvas.height = Math.round(newImg.naturalHeight * displayScale);
+                ctx.drawImage(newImg, 0, 0, canvas.width, canvas.height);
+                frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
+                corners = [
+                    {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
+                    {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
+                ];
+                framingZoom = 1; framingPanX = 0; framingPanY = 0;
+                
+                progressOverlay.classList.remove('visible');
+                currentStep = 'framing';
+                updateUI();
+                drawFrozenScene();
+            };
+            newImg.src = url;
+        }, 'image/jpeg', 0.92);
     }
-
+    
     function updatePageCounter() { pageCounter.textContent = `Страниц: ${savedPages.length}`; }
 
     function removeLastPage() {
