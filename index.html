@@ -188,46 +188,58 @@
         canvas.removeEventListener('touchend', onFramingTouchEnd);
     }
 
-    function drawFrozenScene() {
+        function drawFrozenScene() {
         if (!frozenImageData) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Рисуем увеличенное изображение
         ctx.save();
-        ctx.translate(framingPanX, framingPanY);
+        ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
         ctx.scale(framingZoom, framingZoom);
+        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore();
+        
+        // Затемнение поверх
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
         if (!corners) return;
+        
+        // Маркеры рисуются в исходных координатах (не зависят от зума)
         const [TL, TR, BR, BL] = corners;
-        const scaleX = framingZoom;
-        const scaleY = framingZoom;
-        const panX = framingPanX;
-        const panY = framingPanY;
-        const sTL = {x: TL.x * scaleX + panX, y: TL.y * scaleY + panY};
-        const sTR = {x: TR.x * scaleX + panX, y: TR.y * scaleY + panY};
-        const sBR = {x: BR.x * scaleX + panX, y: BR.y * scaleY + panY};
-        const sBL = {x: BL.x * scaleX + panX, y: BL.y * scaleY + panY};
+        
+        // Вырезаем область документа
         ctx.save();
         ctx.beginPath();
-        ctx.moveTo(sTL.x, sTL.y);
-        ctx.lineTo(sTR.x, sTR.y);
-        ctx.lineTo(sBR.x, sBR.y);
-        ctx.lineTo(sBL.x, sBL.y);
+        ctx.moveTo(TL.x, TL.y);
+        ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y);
+        ctx.lineTo(BL.x, BL.y);
         ctx.closePath();
         ctx.clip();
+        // Рисуем увеличенное изображение внутри области
+        ctx.save();
+        ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
+        ctx.scale(framingZoom, framingZoom);
+        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore();
+        ctx.restore();
+        
+        // Рамка
         ctx.strokeStyle = '#2a6df4';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(sTL.x, sTL.y);
-        ctx.lineTo(sTR.x, sTR.y);
-        ctx.lineTo(sBR.x, sBR.y);
-        ctx.lineTo(sBL.x, sBL.y);
+        ctx.moveTo(TL.x, TL.y);
+        ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y);
+        ctx.lineTo(BL.x, BL.y);
         ctx.closePath();
         ctx.stroke();
-        [sTL, sTR, sBR, sBL].forEach((c, i) => {
+        
+        // Маркеры (всегда одного размера, не зависят от зума)
+        [TL, TR, BR, BL].forEach((c, i) => {
             ctx.fillStyle = '#2a6df4';
             ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE / 2, 0, Math.PI * 2);
@@ -242,7 +254,7 @@
         });
     }
 
-    function onFramingTouchStart(e) {
+        function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
         if (e.touches.length === 2) {
             lastPinchDist = Math.hypot(
@@ -256,19 +268,17 @@
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        const invScale = 1 / framingZoom;
-        const rx = (sx - framingPanX) * invScale;
-        const ry = (sy - framingPanY) * invScale;
         if (corners) {
             for (let i = 0; i < corners.length; i++) {
-                if (Math.hypot(sx - (corners[i].x * framingZoom + framingPanX), sy - (corners[i].y * framingZoom + framingPanY)) < HANDLE_SIZE * 1.5) {
+                // Маркеры в исходных координатах — проверяем напрямую
+                if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
                     draggingCorner = i;
                     return;
                 }
             }
         }
     }
-    function onFramingTouchMove(e) {
+        function onFramingTouchMove(e) {
         if (currentStep !== 'framing') return;
         if (e.touches.length === 2) {
             e.preventDefault();
@@ -278,10 +288,7 @@
             );
             if (lastPinchDist) {
                 const scale = dist / lastPinchDist;
-                const newZoom = Math.max(1, Math.min(5, framingZoom * scale));
-                framingPanX = (framingPanX - canvas.width/2) * (newZoom / framingZoom) + canvas.width/2;
-                framingPanY = (framingPanY - canvas.height/2) * (newZoom / framingZoom) + canvas.height/2;
-                framingZoom = newZoom;
+                framingZoom = Math.max(1, Math.min(5, framingZoom * scale));
             }
             lastPinchDist = dist;
             drawFrozenScene();
@@ -293,9 +300,9 @@
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        const invScale = 1 / framingZoom;
-        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, (sx - framingPanX) * invScale));
-        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, (sy - framingPanY) * invScale));
+        // Маркеры в исходных координатах
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
     }
     function onFramingTouchEnd(e) {
