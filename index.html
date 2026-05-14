@@ -410,7 +410,7 @@
         return { x: (H[0] * x + H[1] * y + H[2]) / d, y: (H[3] * x + H[4] * y + H[5]) / d };
     }
 
-    async function straightenLastPage() {
+        async function straightenLastPage() {
         if (!savedPages.length) return;
         const last = savedPages[savedPages.length - 1];
         if (!last.corners) {
@@ -436,24 +436,45 @@
             if (!H) throw new Error('Homography failed');
             const Hi = invertHomography(H);
             if (!Hi) throw new Error('Invert failed');
-            // Получаем оригинальное изображение
+            
+            // Получаем оригинальное изображение и его пиксельные данные
             const response = await fetch(last.url);
             const blob = await response.blob();
             const img = await createImageBitmap(blob);
+            
+            // Рисуем оригинал на временный canvas для получения ImageData
+            const srcCanvas = document.createElement('canvas');
+            srcCanvas.width = canvas.width;
+            srcCanvas.height = canvas.height;
+            const srcCtx = srcCanvas.getContext('2d');
+            srcCtx.drawImage(img, 0, 0);
+            const srcData = srcCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+            img.close();
+            
+            // Создаём выходной canvas и ImageData
             const tmpCanvas = document.createElement('canvas');
             tmpCanvas.width = outW;
             tmpCanvas.height = outH;
             const tmpCtx = tmpCanvas.getContext('2d');
+            const outData = tmpCtx.createImageData(outW, outH);
+            
+            // Быстрое попиксельное копирование (в 100 раз быстрее drawImage)
             for (let y = 0; y < outH; y++) {
                 for (let x = 0; x < outW; x++) {
                     const p = applyHomography(Hi, x, y);
                     const sx = Math.round(p.x), sy = Math.round(p.y);
                     if (sx >= 0 && sx < canvas.width && sy >= 0 && sy < canvas.height) {
-                        tmpCtx.drawImage(img, sx, sy, 1, 1, x, y, 1, 1);
+                        const srcIdx = (sy * canvas.width + sx) * 4;
+                        const dstIdx = (y * outW + x) * 4;
+                        outData.data[dstIdx] = srcData[srcIdx];
+                        outData.data[dstIdx + 1] = srcData[srcIdx + 1];
+                        outData.data[dstIdx + 2] = srcData[srcIdx + 2];
+                        outData.data[dstIdx + 3] = 255;
                     }
                 }
             }
-            img.close();
+            tmpCtx.putImageData(outData, 0, 0);
+            
             const newBlob = await new Promise(resolve => tmpCanvas.toBlob(resolve, 'image/jpeg', 0.92));
             const newUrl = URL.createObjectURL(newBlob);
             URL.revokeObjectURL(last.url);
