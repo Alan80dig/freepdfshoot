@@ -369,6 +369,8 @@
         if (Math.abs(angle) > 0.01) {
             const w = tmpCanvas.width, h = tmpCanvas.height;
             const diag = Math.ceil(Math.sqrt(w * w + h * h));
+            
+            // Шаг 1: Поворачиваем на -angle, чтобы выровнять
             const rotatedCanvas = document.createElement('canvas');
             rotatedCanvas.width = diag;
             rotatedCanvas.height = diag;
@@ -377,7 +379,7 @@
             rctx.rotate(-angle);
             rctx.drawImage(tmpCanvas, -w / 2, -h / 2);
             
-            // Обрезаем прозрачный фон
+            // Шаг 2: Обрезаем прозрачный фон
             const imgData = rctx.getImageData(0, 0, diag, diag);
             const data = imgData.data;
             let top = diag, bottom = 0, left = diag, right = 0;
@@ -394,14 +396,16 @@
             }
             const cropW2 = right - left + 1;
             const cropH2 = bottom - top + 1;
+            
             if (cropW2 > 0 && cropH2 > 0) {
+                // Вырезаем без фона
                 const croppedCanvas = document.createElement('canvas');
                 croppedCanvas.width = cropW2;
                 croppedCanvas.height = cropH2;
                 const cctx = croppedCanvas.getContext('2d');
                 cctx.putImageData(imgData, -left, -top, left, top, cropW2, cropH2);
                 
-                // Поворачиваем обратно
+                // Шаг 3: Поворачиваем обратно на +angle
                 const w2 = croppedCanvas.width, h2 = croppedCanvas.height;
                 const diag2 = Math.ceil(Math.sqrt(w2 * w2 + h2 * h2));
                 const finalCanvas = document.createElement('canvas');
@@ -409,36 +413,9 @@
                 finalCanvas.height = diag2;
                 const fctx = finalCanvas.getContext('2d');
                 fctx.translate(diag2 / 2, diag2 / 2);
-                fctx.rotate(angle); // обратный поворот
+                fctx.rotate(angle);
                 fctx.drawImage(croppedCanvas, -w2 / 2, -h2 / 2);
-                
-                // Обрезаем фон после обратного поворота
-                const imgData2 = fctx.getImageData(0, 0, diag2, diag2);
-                const data2 = imgData2.data;
-                let top2 = diag2, bottom2 = 0, left2 = diag2, right2 = 0;
-                for (let y = 0; y < diag2; y++) {
-                    for (let x = 0; x < diag2; x++) {
-                        const idx = (y * diag2 + x) * 4;
-                        if (data2[idx + 3] > 0) {
-                            if (y < top2) top2 = y;
-                            if (y > bottom2) bottom2 = y;
-                            if (x < left2) left2 = x;
-                            if (x > right2) right2 = x;
-                        }
-                    }
-                }
-                const fw = right2 - left2 + 1;
-                const fh = bottom2 - top2 + 1;
-                if (fw > 0 && fh > 0) {
-                    const resultCanvas = document.createElement('canvas');
-                    resultCanvas.width = fw;
-                    resultCanvas.height = fh;
-                    const rctx2 = resultCanvas.getContext('2d');
-                    rctx2.putImageData(imgData2, -left2, -top2, left2, top2, fw, fh);
-                    resultCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
-                } else {
-                    croppedCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
-                }
+                finalCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
             } else {
                 rotatedCanvas.toBlob(saveBlob, 'image/jpeg', 0.92);
             }
