@@ -122,7 +122,10 @@
     function resetToReady() {
         unbindFramingEvents();
         frozenImageData = null;
-        originalImage = null;
+        if (originalImage) {
+            originalImage.src = '';
+            originalImage = null;
+        }
         corners = null;
         draggingCorner = -1;
         currentStep = 'ready';
@@ -171,14 +174,38 @@
     }
 
     function bindFramingEvents() {
+        canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
         canvas.addEventListener('touchend', onFramingTouchEnd);
+        canvas.addEventListener('touchcancel', onFramingTouchEnd);
     }
     function unbindFramingEvents() {
+        canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
+        canvas.removeEventListener('touchcancel', onFramingTouchEnd);
+    }
+
+    function toCanvasCoords(clientX, clientY) {
+        var r = canvas.getBoundingClientRect();
+        var scaleX = canvas.width / r.width;
+        var scaleY = canvas.height / r.height;
+        var cssX = clientX - r.left;
+        var cssY = clientY - r.top;
+        return { x: cssX * scaleX, y: cssY * scaleY };
+    }
+
+    function findCornerUnderFinger(cx, cy) {
+        if (!corners) return -1;
+        for (var i = 0; i < corners.length; i++) {
+            var dx = cx - corners[i].x;
+            var dy = cy - corners[i].y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < HANDLE_SIZE * 2) return i;
+        }
+        return -1;
     }
 
     function drawFrozenScene() {
@@ -211,29 +238,30 @@
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
-        e.preventDefault(); e.stopPropagation();
-        const t = e.touches[0], r = canvas.getBoundingClientRect();
-        const sx = (t.clientX - r.left) * (canvas.width / r.width);
-        const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        if (!corners) return;
-        for (let i = 0; i < corners.length; i++) {
-            if (Math.hypot(sx - corners[i].x, sy - corners[i].y) < HANDLE_SIZE * 1.5) {
-                draggingCorner = i;
-                return;
-            }
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        var touch = e.touches[0];
+        var coords = toCanvasCoords(touch.clientX, touch.clientY);
+        draggingCorner = findCornerUnderFinger(coords.x, coords.y);
     }
+
     function onFramingTouchMove(e) {
+        if (currentStep !== 'framing') return;
+        e.preventDefault();
+        e.stopPropagation();
         if (draggingCorner < 0 || !corners) return;
-        e.preventDefault(); e.stopPropagation();
-        const t = e.touches[0], r = canvas.getBoundingClientRect();
-        const sx = (t.clientX - r.left) * (canvas.width / r.width);
-        const sy = (t.clientY - r.top) * (canvas.height / r.height);
-        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
-        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
+        var touch = e.touches[0];
+        var coords = toCanvasCoords(touch.clientX, touch.clientY);
+        var cx = Math.max(0, Math.min(canvas.width, coords.x));
+        var cy = Math.max(0, Math.min(canvas.height, coords.y));
+        corners[draggingCorner].x = cx;
+        corners[draggingCorner].y = cy;
         drawFrozenScene();
     }
-    function onFramingTouchEnd(e) { draggingCorner = -1; }
+
+    function onFramingTouchEnd(e) {
+        draggingCorner = -1;
+    }
 
     function resetCrop() {
         const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
@@ -283,7 +311,10 @@
             savedPages.push({ url, blob });
             updatePageCounter();
             frozenImageData = null;
-            originalImage = null;
+            if (originalImage) {
+                originalImage.src = '';
+                originalImage = null;
+            }
             corners = null;
             currentStep = 'saved';
             statusDiv.textContent = 'Страница сохранена';
@@ -458,8 +489,14 @@
     window.addEventListener('beforeunload', () => {
         savedPages.forEach(item => URL.revokeObjectURL(item.url));
         savedPages = [];
-        originalImage = null;
+        if (originalImage) {
+            originalImage.src = '';
+            originalImage = null;
+        }
         frozenImageData = null;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 0;
+        canvas.height = 0;
     });
 </script>
 </body>
