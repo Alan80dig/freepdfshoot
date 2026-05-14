@@ -13,27 +13,23 @@
         body { display: flex; flex-direction: column; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
         .viewfinder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1; display: flex; align-items: center; justify-content: center; }
         .viewfinder canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: flex-end; }
+        .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; }
         .ui-overlay > * { pointer-events: auto; }
-        .header { position: absolute; top: 12px; left: 0; right: 0; text-align: center; z-index: 11; }
-        .header h1 { font-size: 1.2rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
-        .header .sub { font-size: 0.7rem; color: rgba(255,255,255,0.7); text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
-        .page-counter { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.6); color: #fff; font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; z-index: 12; backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); }
-        .status-bar { text-align: center; padding: 0 20px 8px; font-size: 0.85rem; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 24px; }
-        .status-bar.ready { color: #4caf50; font-weight: 500; }
-        .status-bar.error { color: #ff6b6b; font-weight: 500; }
-        .status-bar.hidden { display: none; }
-        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 15; padding: 0 16px 20px; display: flex; gap: 8px; flex-wrap: wrap; pointer-events: auto; background: rgba(0,0,0,0.5); }
+        .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; gap: 12px; }
+        .header { text-align: center; flex: 1; }
+        .header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 0; }
+        .page-counter { background: rgba(0,0,0,0.6); color: #fff; font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; white-space: nowrap; backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); }
+        .status-bar { text-align: center; padding: 4px 20px; font-size: 0.75rem; color: #4caf50; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 20px; }
+        .status-bar.error { color: #ff6b6b; }
+        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 15; padding: 0 12px 16px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: auto; background: rgba(0,0,0,0.5); }
         .action-area.transparent { background: rgba(0,0,0,0.3); }
-        .btn { display: block; flex: 1; min-width: 55px; padding: 12px; font-size: 0.8rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; }
+        .btn { display: block; flex: 1; min-width: 50px; padding: 10px 8px; font-size: 0.7rem; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3); transition: 0.2s; text-align: center; white-space: nowrap; }
         .btn:active { opacity: 0.85; }
         .btn:disabled { background: rgba(58,58,58,0.8); color: #999; cursor: not-allowed; }
-        .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; flex: 0.5; }
-        .btn.danger { background: rgba(180,40,40,0.85); color: #fff; flex: 0.5; }
-        .btn.save { background: #4caf50; color: #fff; flex: 0.5; }
-        .results { padding: 12px 16px; display: none; background: rgba(20,20,20,0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,0.1); border-radius: 16px 16px 0 0; margin: 0 8px; }
-        .results.visible { display: block; }
-        .results .tip { font-size: 0.85rem; color: #ddd; background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; line-height: 1.4; text-align: center; }
+        .btn.primary { background: #2a6df4; }
+        .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; }
+        .btn.danger { background: rgba(180,40,40,0.85); }
+        .btn.save { background: #4caf50; }
         .progress-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 20; display: none; align-items: center; justify-content: center; flex-direction: column; }
         .progress-overlay.visible { display: flex; }
         .progress-text { color: #fff; font-size: 1rem; margin-bottom: 12px; }
@@ -49,18 +45,19 @@
     <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
 </div>
 <div class="ui-overlay">
-    <div class="header"><h1>FreePDFShoot</h1><div class="sub">Бесплатный • Приватный • Без серверов</div></div>
-    <div class="page-counter" id="pageCounter">Страниц: 0</div>
+    <div class="top-bar">
+        <div class="page-counter" id="pageCounter">Страниц: 0</div>
+        <div class="header"><h1>FreePDFShoot</h1></div>
+    </div>
+    <div style="flex:1;"></div>
     <div class="status-bar" id="status">Нажмите «Снять» для запуска камеры</div>
-    <div class="results" id="results"><div class="tip" id="resTip"></div></div>
 </div>
-<div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
+<div class="action-area" id="actionArea"><button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
 <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const statusDiv = document.getElementById('status');
     const actionArea = document.getElementById('actionArea');
-    const resultsDiv = document.getElementById('results');
     const pageCounter = document.getElementById('pageCounter');
     const cameraInput = document.getElementById('cameraInput');
     const progressOverlay = document.getElementById('progressOverlay');
@@ -75,14 +72,6 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
-    // Трансформации: зум, панорама, вращение
-    let framingZoom = 1;
-    let framingPanX = 0, framingPanY = 0;
-    let framingRotation = 0;
-    // Для двух пальцев
-    let lastPinchDist = 0;
-    let lastPinchMidX = 0, lastPinchMidY = 0;
-    let lastPinchAngle = 0;
 
     function handleAction() {
         if (currentStep === 'saving' || currentStep === 'generating') return;
@@ -116,9 +105,9 @@
                 {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
             ];
             draggingCorner = -1;
-            framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
             currentStep = 'framing';
-            statusDiv.classList.add('hidden');
+            statusDiv.textContent = 'Расставьте маркеры по углам документа';
+            statusDiv.className = 'status-bar';
             updateUI();
             bindFramingEvents();
             drawFrozenScene();
@@ -133,12 +122,9 @@
         originalImage = null;
         corners = null;
         draggingCorner = -1;
-        framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
-        resultsDiv.classList.remove('visible');
         currentStep = 'ready';
         statusDiv.textContent = 'Нажмите «Снять» для запуска камеры';
-        statusDiv.className = 'status-bar ready';
-        statusDiv.classList.remove('hidden');
+        statusDiv.className = 'status-bar';
         updateUI();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
@@ -147,44 +133,36 @@
         actionArea.classList.remove('transparent');
         switch (currentStep) {
             case 'ready':
-                statusDiv.classList.remove('hidden');
                 actionArea.innerHTML = `
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
+                    <button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять</button>
                     ${savedPages.length > 0 ? `
-                        <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
-                        <button class="btn save" onclick="savePDF()">💾 Сохранить</button>
-                        <button class="btn danger" onclick="clearAllPages()">🗑 Всё</button>
+                        <button class="btn secondary" onclick="sharePDF()">📤 (${savedPages.length})</button>
+                        <button class="btn save" onclick="savePDF()">💾</button>
+                        <button class="btn danger" onclick="clearAllPages()">🗑</button>
                     ` : ''}
                 `;
                 break;
             case 'framing':
-                statusDiv.classList.add('hidden');
                 actionArea.classList.add('transparent');
                 actionArea.innerHTML = `
-                    <button class="btn secondary" onclick="resetCrop()">↺ Сброс</button>
-                    <button class="btn" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
+                    <button class="btn secondary" onclick="resetCrop()">↺</button>
+                    <button class="btn danger" onclick="resetToReady()">↩</button>
+                    <button class="btn primary" id="actionBtn" onclick="handleAction()">✂️ Обрезать</button>
                 `;
                 break;
             case 'saving':
-                statusDiv.classList.remove('hidden');
-                statusDiv.textContent = '⏳ Сохраняю...';
-                actionArea.innerHTML = `<button class="btn" disabled>⏳ Сохраняю...</button>`;
+                actionArea.innerHTML = `<button class="btn primary" disabled>⏳</button>`;
                 break;
             case 'saved':
-                statusDiv.classList.remove('hidden');
-                statusDiv.textContent = '✅ Страница сохранена!';
-                statusDiv.className = 'status-bar ready';
                 actionArea.innerHTML = `
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
+                    <button class="btn primary" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn save" onclick="savePDF()">💾 Сохранить</button>
-                    <button class="btn secondary" onclick="sharePDF()">📤 Отправить (${savedPages.length})</button>
+                    <button class="btn save" onclick="savePDF()">💾</button>
+                    <button class="btn secondary" onclick="sharePDF()">📤 (${savedPages.length})</button>
                 `;
                 break;
             case 'generating':
-                statusDiv.classList.remove('hidden');
-                statusDiv.textContent = '⏳ Создаю PDF...';
-                actionArea.innerHTML = `<button class="btn" disabled>⏳ Создаю PDF...</button>`;
+                actionArea.innerHTML = `<button class="btn primary" disabled>⏳ PDF...</button>`;
                 break;
         }
     }
@@ -204,46 +182,23 @@
 
     function drawFrozenScene() {
         if (!frozenImageData) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Рисуем с трансформациями
-        ctx.save();
-        ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
-        ctx.rotate(framingRotation);
-        ctx.scale(framingZoom, framingZoom);
-        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
-        ctx.restore();
-        
-        // Затемнение
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
         if (!corners) return;
         const [TL, TR, BR, BL] = corners;
-        
-        // Вырезаем область документа
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.clip();
-        ctx.save();
-        ctx.translate(canvas.width/2 + framingPanX, canvas.height/2 + framingPanY);
-        ctx.rotate(framingRotation);
-        ctx.scale(framingZoom, framingZoom);
-        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(frozenImageData, 0, 0);
-        ctx.restore(); ctx.restore();
-        
-        // Рамка
+        ctx.restore();
         ctx.strokeStyle = '#2a6df4'; ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.stroke();
-        
-        // Маркеры
         [TL, TR, BR, BL].forEach((c, i) => {
             ctx.fillStyle = '#2a6df4'; ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
@@ -255,18 +210,6 @@
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
-        if (e.touches.length === 2) {
-            const r = canvas.getBoundingClientRect();
-            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
-            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
-            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
-            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
-            lastPinchDist = Math.hypot(x2 - x1, y2 - y1);
-            lastPinchMidX = (x1 + x2) / 2;
-            lastPinchMidY = (y1 + y2) / 2;
-            lastPinchAngle = Math.atan2(y2 - y1, x2 - x1);
-            return;
-        }
         e.preventDefault(); e.stopPropagation();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
@@ -280,42 +223,6 @@
         }
     }
     function onFramingTouchMove(e) {
-        if (currentStep !== 'framing') return;
-        if (e.touches.length === 2) {
-            e.preventDefault();
-            const r = canvas.getBoundingClientRect();
-            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
-            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
-            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
-            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
-            const dist = Math.hypot(x2 - x1, y2 - y1);
-            const midX = (x1 + x2) / 2;
-            const midY = (y1 + y2) / 2;
-            const angle = Math.atan2(y2 - y1, x2 - x1);
-            
-            if (lastPinchDist && lastPinchMidX) {
-                // Зум
-                const scale = dist / lastPinchDist;
-                const newZoom = Math.max(1, Math.min(5, framingZoom * scale));
-                // Панорама
-                framingPanX += (midX - lastPinchMidX);
-                framingPanY += (midY - lastPinchMidY);
-                const maxPan = canvas.width * (newZoom - 1) / 2;
-                framingPanX = Math.max(-maxPan, Math.min(maxPan, framingPanX));
-                framingPanY = Math.max(-maxPan, Math.min(maxPan, framingPanY));
-                framingZoom = newZoom;
-                // Вращение
-                if (lastPinchAngle) {
-                    framingRotation += angle - lastPinchAngle;
-                }
-            }
-            lastPinchDist = dist;
-            lastPinchMidX = midX;
-            lastPinchMidY = midY;
-            lastPinchAngle = angle;
-            drawFrozenScene();
-            return;
-        }
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault(); e.stopPropagation();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
@@ -325,14 +232,9 @@
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
     }
-    function onFramingTouchEnd(e) {
-        if (e.touches.length < 2) { lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0; lastPinchAngle = 0; }
-        draggingCorner = -1;
-    }
+    function onFramingTouchEnd(e) { draggingCorner = -1; }
 
     function resetCrop() {
-        framingZoom = 1; framingPanX = 0; framingPanY = 0; framingRotation = 0;
-        lastPinchDist = 0; lastPinchMidX = 0; lastPinchMidY = 0; lastPinchAngle = 0;
         const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
         corners = [
             {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
@@ -354,9 +256,8 @@
         const cropW = maxX - minX;
         const cropH = maxY - minY;
         if (cropW < 10 || cropH < 10) {
-            statusDiv.textContent = 'Область слишком мала.';
+            statusDiv.textContent = 'Область слишком мала';
             statusDiv.className = 'status-bar error';
-            statusDiv.classList.remove('hidden');
             currentStep = 'framing';
             bindFramingEvents();
             updateUI();
@@ -370,9 +271,8 @@
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         tmpCanvas.toBlob(blob => {
             if (!blob) {
-                statusDiv.textContent = 'Ошибка обработки.';
+                statusDiv.textContent = 'Ошибка обработки';
                 statusDiv.className = 'status-bar error';
-                statusDiv.classList.remove('hidden');
                 currentStep = 'framing';
                 bindFramingEvents();
                 updateUI();
@@ -385,13 +285,13 @@
             originalImage = null;
             corners = null;
             currentStep = 'saved';
+            statusDiv.textContent = 'Страница сохранена';
+            statusDiv.className = 'status-bar';
             updateUI();
-            resultsDiv.classList.add('visible');
-            document.getElementById('resTip').textContent = `Готово страниц: ${savedPages.length}.`;
         }, 'image/jpeg', 0.92);
     }
 
-    function updatePageCounter() { pageCounter.textContent = `Страниц: ${savedPages.length}`; }
+    function updatePageCounter() { pageCounter.textContent = savedPages.length ? `Страниц: ${savedPages.length}` : 'Страниц: 0'; }
 
     function removeLastPage() {
         if (!savedPages.length) return;
@@ -399,10 +299,12 @@
         URL.revokeObjectURL(item.url);
         updatePageCounter();
         if (!savedPages.length) {
-            resultsDiv.classList.remove('visible');
+            statusDiv.textContent = 'Нажмите «Снять» для запуска камеры';
+            statusDiv.className = 'status-bar';
             resetToReady();
         } else {
-            statusDiv.textContent = '🗑 Последняя страница удалена.';
+            statusDiv.textContent = 'Удалено';
+            statusDiv.className = 'status-bar';
             updateUI();
         }
     }
@@ -431,11 +333,11 @@
             a.href = url; a.download = 'FreePDFShoot.pdf';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            statusDiv.textContent = '✅ PDF сохранён!';
-            statusDiv.className = 'status-bar ready';
+            statusDiv.textContent = 'PDF сохранён';
+            statusDiv.className = 'status-bar';
         } catch (err) {
             console.error(err);
-            statusDiv.textContent = 'Ошибка создания PDF.';
+            statusDiv.textContent = 'Ошибка PDF';
             statusDiv.className = 'status-bar error';
         } finally {
             progressOverlay.classList.remove('visible');
@@ -465,12 +367,12 @@
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 URL.revokeObjectURL(url);
             }
-            statusDiv.textContent = '✅ Отправлено!';
-            statusDiv.className = 'status-bar ready';
+            statusDiv.textContent = 'Отправлено';
+            statusDiv.className = 'status-bar';
         } catch (err) {
             if (err.name !== 'AbortError') {
                 console.error(err);
-                statusDiv.textContent = 'Ошибка создания PDF.';
+                statusDiv.textContent = 'Ошибка PDF';
                 statusDiv.className = 'status-bar error';
             }
         } finally {
@@ -487,7 +389,7 @@
             images.push({ data: new Uint8Array(buf), dims: null });
         }
         for (let i = 0; i < images.length; i++) {
-            progressText.textContent = `Обрабатываю ${i + 1} из ${images.length}...`;
+            progressText.textContent = `Страница ${i + 1} из ${images.length}`;
             progressFill.style.width = `${Math.round((i / images.length) * 100)}%`;
             images[i].dims = await getJPEGDimensionsFromBlob(blobs[i]);
         }
