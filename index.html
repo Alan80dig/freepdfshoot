@@ -1,1 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/freepdfshoot/manifest.json">
+    <title>FreePDFShoot – Приватный PDF-сканер</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; overflow-x: hidden; background: #111; color: #ddd; font-family: system-ui, -apple-system, sans-serif; }
+        body { display: flex; flex-direction: column; align-items: center; }
+        .container { max-width: 800px; width: 100%; padding: 20px 16px; }
 
+        /* Hero */
+        .hero { text-align: center; padding: 40px 0 30px; }
+        .hero h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+        .hero .sub { font-size: 1rem; color: #aaa; margin-bottom: 28px; line-height: 1.5; }
+        .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        .btn { display: inline-block; padding: 14px 28px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; text-decoration: none; color: #fff; background: #2a6df4; transition: 0.2s; }
+        .btn:active { opacity: 0.85; }
+        .btn.outline { background: transparent; border: 2px solid #2a6df4; color: #2a6df4; }
+
+        /* Steps */
+        .steps { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 20px 0 30px; }
+        .step { flex: 1; min-width: 140px; max-width: 200px; text-align: center; padding: 16px; background: #1a1a1a; border-radius: 16px; }
+        .step .icon { font-size: 2rem; margin-bottom: 10px; }
+        .step h3 { font-size: 0.9rem; color: #fff; margin-bottom: 6px; }
+        .step p { font-size: 0.75rem; color: #999; line-height: 1.4; }
+
+        /* Screenshots */
+        .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; padding: 20px 0 30px; }
+        .screenshots img { width: 100%; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .screenshots .caption { text-align: center; font-size: 0.7rem; color: #888; margin-top: 4px; }
+
+        /* Info */
+        .section-title { font-size: 1.3rem; font-weight: 700; color: #fff; text-align: center; margin-bottom: 16px; }
+        .privacy { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 30px; }
+        .privacy-item { flex: 1; min-width: 160px; max-width: 220px; text-align: center; padding: 16px; background: #1a1a1a; border-radius: 16px; }
+        .privacy-item .icon { font-size: 1.5rem; margin-bottom: 8px; }
+        .privacy-item p { font-size: 0.75rem; color: #999; line-height: 1.4; }
+
+        /* Browser settings */
+        .browser-setup { text-align: center; padding: 0 0 30px; }
+        .browser-setup img { max-width: 100%; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .browser-setup ol { text-align: left; display: inline-block; font-size: 0.8rem; color: #aaa; line-height: 1.8; margin-top: 12px; }
+
+        /* Footer */
+        .footer { text-align: center; padding: 30px 0 20px; font-size: 0.75rem; color: #666; }
+        .footer a { color: #2a6df4; text-decoration: none; }
+
+        /* PWA install banner */
+        .install-banner { display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 30; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 16px; text-align: center; }
+        .install-banner.visible { display: block; }
+        .install-banner p { font-size: 0.85rem; color: #fff; margin-bottom: 10px; }
+        .install-banner .btn { padding: 10px 24px; font-size: 0.85rem; }
+        .install-banner .close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: #888; font-size: 1.2rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- Hero -->
+    <div class="hero">
+        <h1>FreePDFShoot</h1>
+        <div class="sub">Приватный PDF-сканер. Без серверов. Без регистрации. Без сливов.<br>Работает прямо в браузере, даже без интернета.</div>
+        <div class="hero-buttons">
+            <a class="btn" href="/freepdfshoot/app.html">🚀 Запустить</a>
+            <button class="btn outline" id="installBtn" onclick="installPWA()" style="display:none;">📲 Установить</button>
+        </div>
+    </div>
+
+    <!-- Steps -->
+    <div class="section-title">Как это работает</div>
+    <div class="steps">
+        <div class="step">
+            <div class="icon">📸</div>
+            <h3>Снял</h3>
+            <p>Системная камера — идеальное качество, автофокус, вспышка</p>
+        </div>
+        <div class="step">
+            <div class="icon">✂️</div>
+            <h3>Обрезал</h3>
+            <p>Расставь маркеры по углам документа и обрежь лишнее</p>
+        </div>
+        <div class="step">
+            <div class="icon">📤</div>
+            <h3>Отправил</h3>
+            <p>Многостраничный PDF через системное меню — в WhatsApp, почту, Telegram</p>
+        </div>
+    </div>
+
+    <!-- Screenshots -->
+    <div class="section-title">Как выглядит</div>
+    <div class="screenshots">
+        <div><img src="screenshots/startwindow.jpg" alt="Главный экран"><div class="caption">Главный экран</div></div>
+        <div><img src="screenshots/trimming.jpg" alt="Обрезка"><div class="caption">Обрезка документа</div></div>
+        <div><img src="screenshots/saveviewer.jpg" alt="Предпросмотр"><div class="caption">Предпросмотр</div></div>
+        <div><img src="screenshots/forward.jpg" alt="Отправка"><div class="caption">Отправка PDF</div></div>
+    </div>
+
+    <!-- Privacy -->
+    <div class="section-title">Почему это безопасно</div>
+    <div class="privacy">
+        <div class="privacy-item">
+            <div class="icon">🔒</div>
+            <p>Ни один байт не покидает телефон. Все вычисления — в браузере.</p>
+        </div>
+        <div class="privacy-item">
+            <div class="icon">📱</div>
+            <p>Документы хранятся только в памяти браузера и исчезают при закрытии.</p>
+        </div>
+        <div class="privacy-item">
+            <div class="icon">💨</div>
+            <p>Никаких серверов. Никаких облаков. Никаких регистраций.</p>
+        </div>
+    </div>
+
+    <!-- Browser settings -->
+    <div class="section-title">Настройка браузера</div>
+    <div class="browser-setup">
+        <img src="screenshots/browsersettings.jpg" alt="Настройки браузера">
+        <ol>
+            <li>Откройте Настройки телефона</li>
+            <li>Приложения → Chrome → Разрешения</li>
+            <li>Включите Камеру → «Разрешить»</li>
+            <li>Обновите страницу FreePDFShoot</li>
+        </ol>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        Бесплатно. Навсегда. Без рекламы.<br>
+        <a href="https://github.com/alan80dig/freepdfshoot" target="_blank">GitHub</a> • MIT License
+    </div>
+
+</div>
+
+<!-- PWA Install banner -->
+<div class="install-banner" id="installBanner">
+    <button class="close" onclick="document.getElementById('installBanner').classList.remove('visible')">&times;</button>
+    <p>Установите FreePDFShoot на домашний экран для быстрого доступа</p>
+    <button class="btn" onclick="installPWA()">📲 Установить</button>
+</div>
+
+<script>
+    let deferredPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        document.getElementById('installBtn').style.display = 'inline-block';
+        // Показываем баннер через 3 секунды
+        setTimeout(() => {
+            if (deferredPrompt) document.getElementById('installBanner').classList.add('visible');
+        }, 3000);
+    });
+
+    async function installPWA() {
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const result = await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            document.getElementById('installBanner').classList.remove('visible');
+        } else {
+            // iOS: показываем инструкцию
+            alert('На iPhone: нажмите кнопку «Поделиться» (квадрат со стрелкой вверх) в Safari, затем «На экран Домой».');
+        }
+    }
+
+    // Скрываем баннер, если пользователь уже взаимодействовал
+    window.addEventListener('appinstalled', () => {
+        document.getElementById('installBanner').classList.remove('visible');
+        deferredPrompt = null;
+    });
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/freepdfshoot/sw.js')
+            .then(() => console.log('SW registered'))
+            .catch(() => console.log('SW registration failed'));
+    }
+</script>
+</body>
+</html>
