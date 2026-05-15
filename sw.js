@@ -1,7 +1,8 @@
-const CACHE_NAME = 'freepdfshoot-v2';
+const CACHE_NAME = 'freepdfshoot-v3';
 const urlsToCache = [
   '/freepdfshoot/',
   '/freepdfshoot/index.html',
+  '/freepdfshoot/landing.html',
   '/freepdfshoot/manifest.json'
 ];
 
@@ -9,6 +10,16 @@ self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
+      );
+    })
   );
 });
 
