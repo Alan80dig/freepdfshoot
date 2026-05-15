@@ -53,7 +53,7 @@
         img.onload = () => {
             URL.revokeObjectURL(url);
             originalImage = img;
-            const MAX_DIM = 1500;
+            const MAX_DIM = 800;
             displayScale = 1;
             if (img.naturalWidth > MAX_DIM || img.naturalHeight > MAX_DIM) {
                 displayScale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
@@ -62,6 +62,7 @@
             canvas.height = Math.round(img.naturalHeight * displayScale);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            // Нормализованные координаты: 20% отступа от размеров canvas
             const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
             corners = [
                 {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
@@ -122,14 +123,10 @@
 
     function drawFrozenScene() {
         if (!frozenImageData) return;
-        // Очищаем canvas полностью
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // Рисуем изображение
         ctx.putImageData(frozenImageData, 0, 0);
-        // Затемнение
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        // Вырезаем область документа
         if (!corners) return;
         const [TL, TR, BR, BL] = corners;
         ctx.save();
@@ -139,13 +136,11 @@
         ctx.closePath(); ctx.clip();
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore();
-        // Рамка
         ctx.strokeStyle = '#2a6df4'; ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.stroke();
-        // Маркеры
         [TL, TR, BR, BL].forEach((c, i) => {
             ctx.fillStyle = '#2a6df4'; ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
@@ -159,6 +154,7 @@
         if (currentStep !== 'framing') return;
         e.preventDefault();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
+        // Координаты касания В ПИКСЕЛЯХ CANVAS
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
         if (!corners) return;
