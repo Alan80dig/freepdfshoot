@@ -78,7 +78,7 @@
             canvas.height = Math.round(img.naturalHeight * displayScale);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
+            const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
             corners = [
                 {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
                 {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
@@ -208,7 +208,7 @@
     function onFramingTouchEnd(e) { draggingCorner = -1; }
 
     function resetCrop() {
-        const mX = canvas.width * 0.1, mY = canvas.height * 0.1;
+        const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
         corners = [
             {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
             {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
