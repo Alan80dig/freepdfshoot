@@ -9,69 +9,84 @@
     <title>FreePDFShoot – Приватный PDF-сканер</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; overflow-x: hidden; background: #0d0d0d; color: #ccc; font-family: system-ui, -apple-system, sans-serif; }
+        html, body { width: 100%; overflow-x: hidden; background: #f8f6f0; color: #2c2416; font-family: system-ui, -apple-system, sans-serif; }
         body { display: flex; flex-direction: column; align-items: center; }
+
         .container { max-width: 800px; width: 100%; padding: 0 16px; }
 
+        /* Mobile hint */
+        .mobile-hint { text-align: center; padding: 12px 0 0; font-size: 0.7rem; color: #b8a99a; }
+        .mobile-hint span { display: inline-block; background: rgba(42,109,244,0.08); color: #2a6df4; padding: 4px 10px; border-radius: 10px; margin-right: 4px; }
+
         /* Hero */
-        .hero { text-align: center; padding: 50px 0 40px; }
-        .hero .badge { display: inline-block; background: rgba(76,175,80,0.15); color: #4caf50; font-size: 0.75rem; font-weight: 600; padding: 6px 16px; border-radius: 20px; margin-bottom: 20px; letter-spacing: 0.04em; }
-        .hero h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 12px; line-height: 1.2; }
-        .hero .sub { font-size: 1rem; color: #999; margin-bottom: 32px; line-height: 1.6; max-width: 500px; margin-left: auto; margin-right: auto; }
+        .hero { text-align: center; padding: 40px 0 30px; }
+        .hero .badge { display: inline-block; background: rgba(76,175,80,0.12); color: #388e3c; font-size: 0.75rem; font-weight: 600; padding: 6px 16px; border-radius: 20px; margin-bottom: 20px; letter-spacing: 0.04em; }
+        .hero h1 { font-size: 2.2rem; font-weight: 700; color: #1a1309; margin-bottom: 12px; line-height: 1.2; }
+        .hero .sub { font-size: 1rem; color: #6b5d4f; margin-bottom: 32px; line-height: 1.6; max-width: 500px; margin-left: auto; margin-right: auto; }
         .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
         .btn { display: inline-block; padding: 14px 28px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; text-decoration: none; color: #fff; background: #2a6df4; transition: 0.2s; }
         .btn:active { opacity: 0.85; }
         .btn.outline { background: transparent; border: 2px solid #2a6df4; color: #2a6df4; }
 
         /* Trust strip */
-        .trust { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; padding: 0 0 40px; font-size: 0.75rem; color: #777; }
-        .trust span { display: flex; align-items: center; gap: 6px; }
+        .trust { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 0 0 35px; font-size: 0.75rem; color: #8b7b6b; }
+        .trust span { display: flex; align-items: center; gap: 5px; }
 
         /* Steps */
-        .section-title { font-size: 1.4rem; font-weight: 700; color: #fff; text-align: center; margin-bottom: 8px; }
-        .section-sub { font-size: 0.85rem; color: #888; text-align: center; margin-bottom: 24px; }
-        .steps { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 50px; }
-        .step { flex: 1; min-width: 150px; max-width: 200px; text-align: center; padding: 20px 16px; background: #141414; border-radius: 16px; border: 1px solid #1f1f1f; transition: 0.3s; }
-        .step:hover { border-color: #2a6df4; }
+        .section-title { font-size: 1.4rem; font-weight: 700; color: #1a1309; text-align: center; margin-bottom: 6px; }
+        .section-sub { font-size: 0.85rem; color: #8b7b6b; text-align: center; margin-bottom: 24px; }
+        .steps { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 45px; }
+        .step { flex: 1; min-width: 150px; max-width: 200px; text-align: center; padding: 20px 16px; background: #fff; border-radius: 16px; border: 1px solid #e8e0d5; transition: 0.3s; }
+        .step:hover { border-color: #2a6df4; box-shadow: 0 4px 16px rgba(42,109,244,0.08); }
         .step .icon { font-size: 2.2rem; margin-bottom: 12px; }
-        .step h3 { font-size: 0.9rem; color: #fff; margin-bottom: 6px; }
-        .step p { font-size: 0.75rem; color: #999; line-height: 1.5; }
+        .step h3 { font-size: 0.9rem; color: #1a1309; margin-bottom: 6px; }
+        .step p { font-size: 0.75rem; color: #8b7b6b; line-height: 1.5; }
 
         /* Screenshots */
-        .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 0 0 50px; }
-        .screenshots .shot { background: #141414; border-radius: 16px; overflow: hidden; border: 1px solid #1f1f1f; }
+        .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 0 0 45px; }
+        .screenshots .shot { background: #fff; border-radius: 16px; overflow: hidden; border: 1px solid #e8e0d5; }
         .screenshots img { width: 100%; display: block; }
-        .screenshots .caption { text-align: center; font-size: 0.7rem; color: #777; padding: 8px; }
+        .screenshots .caption { text-align: center; font-size: 0.7rem; color: #8b7b6b; padding: 8px; }
 
         /* Security */
-        .security { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 50px; }
-        .security-item { flex: 1; min-width: 160px; max-width: 220px; text-align: center; padding: 20px 16px; background: #141414; border-radius: 16px; border: 1px solid #1f1f1f; }
+        .security { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 45px; }
+        .security-item { flex: 1; min-width: 160px; max-width: 220px; text-align: center; padding: 20px 16px; background: #fff; border-radius: 16px; border: 1px solid #e8e0d5; }
         .security-item .icon { font-size: 1.6rem; margin-bottom: 10px; }
-        .security-item h4 { font-size: 0.85rem; color: #fff; margin-bottom: 6px; }
-        .security-item p { font-size: 0.75rem; color: #999; line-height: 1.5; }
+        .security-item h4 { font-size: 0.85rem; color: #1a1309; margin-bottom: 6px; }
+        .security-item p { font-size: 0.75rem; color: #8b7b6b; line-height: 1.5; }
 
         /* Browser setup */
-        .setup { max-width: 650px; margin: 0 auto 50px; background: #141414; border-radius: 16px; padding: 24px; border: 1px solid #1f1f1f; }
+        .setup { max-width: 650px; margin: 0 auto 45px; background: #fff; border-radius: 16px; padding: 24px; border: 1px solid #e8e0d5; }
         .setup-inner { display: flex; align-items: center; gap: 20px; justify-content: center; flex-wrap: wrap; }
         .setup img { max-width: 200px; border-radius: 12px; }
         .setup .setup-text { flex: 1; min-width: 200px; }
-        .setup .setup-text p { color: #ccc; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.5; }
-        .setup ol { color: #aaa; font-size: 0.8rem; line-height: 2; padding-left: 20px; margin: 0; }
-        .setup ol li strong { color: #fff; }
+        .setup .setup-text p { color: #5c4f3f; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.5; }
+        .setup ol { color: #8b7b6b; font-size: 0.8rem; line-height: 2; padding-left: 20px; margin: 0; }
+        .setup ol li strong { color: #1a1309; }
 
         /* CTA */
-        .cta { text-align: center; padding: 40px 0 50px; }
-        .cta h2 { font-size: 1.5rem; color: #fff; margin-bottom: 10px; }
-        .cta p { font-size: 0.9rem; color: #999; margin-bottom: 24px; }
+        .cta { text-align: center; padding: 30px 0 40px; }
+        .cta h2 { font-size: 1.5rem; color: #1a1309; margin-bottom: 10px; }
+        .cta p { font-size: 0.9rem; color: #8b7b6b; margin-bottom: 24px; }
         .cta .btn { padding: 16px 36px; font-size: 1.1rem; }
 
+        /* Support */
+        .support { text-align: center; padding: 20px 0 35px; }
+        .support p { font-size: 0.8rem; color: #8b7b6b; margin-bottom: 12px; }
+        .support img { height: 28px; }
+
         /* Footer */
-        .footer { text-align: center; padding: 30px 0 20px; font-size: 0.75rem; color: #555; border-top: 1px solid #1a1a1a; }
-        .footer a { color: #4a8af4; text-decoration: none; }
+        .footer { text-align: center; padding: 25px 0 20px; font-size: 0.75rem; color: #b8a99a; border-top: 1px solid #e8e0d5; }
+        .footer a { color: #2a6df4; text-decoration: none; }
     </style>
 </head>
 <body>
 <div class="container">
+
+    <!-- Mobile hint -->
+    <div class="mobile-hint">
+        <span>📱 Оптимизировано для телефона</span> Откройте на смартфоне для лучшего опыта
+    </div>
 
     <!-- Hero -->
     <div class="hero">
@@ -168,6 +183,14 @@
         <h2>Готов попробовать?</h2>
         <p>Никаких установок, никаких регистраций. Просто открой и пользуйся.</p>
         <a class="btn" href="/freepdfshoot/app.html">🚀 Запустить бесплатно</a>
+    </div>
+
+    <!-- Support -->
+    <div class="support">
+        <p>Нравится проект? Поддержи автора через СБП 👇</p>
+        <a href="docs/screenshots/my_QR_copy.png" target="_blank">
+            <img src="https://img.shields.io/badge/Поддержать-СБП-34A853?logo=googlepay&logoColor=white&style=for-the-badge" alt="Поддержать через СБП">
+        </a>
     </div>
 
     <!-- Footer -->
