@@ -52,7 +52,7 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
-    let pendingAction = null; // 'save' или 'share'
+    let pendingAction = null;
 
     function handleAction() {
         if (currentStep === 'saving') return;
@@ -273,7 +273,6 @@
         if (savedPages.length === 0) return;
         pendingAction = action;
         
-        // Рисуем последнюю страницу на preview canvas
         const lastPage = savedPages[savedPages.length - 1];
         const img = new Image();
         img.onload = () => {
@@ -300,10 +299,11 @@
     }
 
     async function confirmAction() {
-        hidePreview();
+        previewModal.classList.remove('visible');
         if (pendingAction === 'save') await savePDF();
         else if (pendingAction === 'share') await sharePDF();
         pendingAction = null;
+        updateUI();
     }
 
     async function savePDF() {
@@ -415,4 +415,4 @@
     });
 </script>
 </body>
-</html>
+    </html>
