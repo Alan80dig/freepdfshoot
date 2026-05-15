@@ -9,23 +9,40 @@
     <title>FreePDFShoot – Приватный скан документов</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; }
         .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; padding: 0 16px 20px; display: flex; gap: 8px; }
         .btn { display: block; flex: 1; padding: 14px; font-size: 0.85rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; }
         .btn.danger { background: rgba(180,40,40,0.85); }
+        .btn.save { background: #4caf50; }
+        .preview-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; background: rgba(0,0,0,0.85); display: none; flex-direction: column; align-items: center; justify-content: center; }
+        .preview-modal.visible { display: flex; }
+        .preview-modal canvas { position: relative; max-width: 90%; max-height: 60%; object-fit: contain; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .preview-title { color: #fff; font-size: 1rem; font-weight: 600; margin-bottom: 16px; }
+        .preview-buttons { display: flex; gap: 8px; margin-top: 16px; padding: 0 16px; width: 100%; max-width: 400px; }
+        .preview-buttons .btn { flex: 1; }
     </style>
 </head>
 <body>
 <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
 <canvas id="canvas"></canvas>
 <div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
+<div class="preview-modal" id="previewModal">
+    <div class="preview-title" id="previewTitle">Предпросмотр PDF</div>
+    <canvas id="previewCanvas"></canvas>
+    <div class="preview-buttons" id="previewButtons"></div>
+</div>
 <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const actionArea = document.getElementById('actionArea');
     const cameraInput = document.getElementById('cameraInput');
+    const previewModal = document.getElementById('previewModal');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const previewCtx = previewCanvas.getContext('2d');
+    const previewTitle = document.getElementById('previewTitle');
+    const previewButtons = document.getElementById('previewButtons');
 
     let currentStep = 'ready';
     let savedPages = [];
@@ -35,6 +52,7 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
+    let pendingAction = null; // 'save' или 'share'
 
     function handleAction() {
         if (currentStep === 'saving') return;
@@ -62,7 +80,6 @@
             canvas.height = Math.round(img.naturalHeight * displayScale);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            // Нормализованные координаты: 20% отступа от размеров canvas
             const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
             corners = [
                 {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
@@ -92,7 +109,14 @@
     function updateUI() {
         switch (currentStep) {
             case 'ready':
-                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>`;
+                actionArea.innerHTML = `
+                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
+                    ${savedPages.length > 0 ? `
+                        <button class="btn secondary" onclick="showPreview('share')">📤 (${savedPages.length})</button>
+                        <button class="btn save" onclick="showPreview('save')">💾</button>
+                        <button class="btn danger" onclick="clearAllPages()">🗑</button>
+                    ` : ''}
+                `;
                 break;
             case 'framing':
                 actionArea.innerHTML = `
@@ -105,7 +129,12 @@
                 actionArea.innerHTML = `<button class="btn" disabled>⏳</button>`;
                 break;
             case 'saved':
-                actionArea.innerHTML = `<button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>`;
+                actionArea.innerHTML = `
+                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
+                    <button class="btn danger" onclick="removeLastPage()">🗑</button>
+                    <button class="btn save" onclick="showPreview('save')">💾</button>
+                    <button class="btn secondary" onclick="showPreview('share')">📤 (${savedPages.length})</button>
+                `;
                 break;
         }
     }
@@ -154,7 +183,6 @@
         if (currentStep !== 'framing') return;
         e.preventDefault();
         const t = e.touches[0], r = canvas.getBoundingClientRect();
-        // Координаты касания В ПИКСЕЛЯХ CANVAS
         const sx = (t.clientX - r.left) * (canvas.width / r.width);
         const sy = (t.clientY - r.top) * (canvas.height / r.height);
         if (!corners) return;
@@ -223,6 +251,160 @@
             currentStep = 'saved';
             updateUI();
         }, 'image/jpeg', 0.92);
+    }
+
+    function removeLastPage() {
+        if (!savedPages.length) return;
+        const item = savedPages.pop();
+        URL.revokeObjectURL(item.url);
+        if (!savedPages.length) resetToReady();
+        else updateUI();
+    }
+
+    function clearAllPages() {
+        if (!confirm('Удалить все страницы?')) return;
+        savedPages.forEach(item => URL.revokeObjectURL(item.url));
+        savedPages = [];
+        resetToReady();
+    }
+
+    // ── ПРЕДПРОСМОТР ──
+    function showPreview(action) {
+        if (savedPages.length === 0) return;
+        pendingAction = action;
+        
+        // Рисуем последнюю страницу на preview canvas
+        const lastPage = savedPages[savedPages.length - 1];
+        const img = new Image();
+        img.onload = () => {
+            previewCanvas.width = img.naturalWidth;
+            previewCanvas.height = img.naturalHeight;
+            previewCtx.drawImage(img, 0, 0);
+            previewModal.classList.add('visible');
+        };
+        img.src = lastPage.url;
+        
+        previewTitle.textContent = savedPages.length > 1 
+            ? `Документ готов (${savedPages.length} стр.)` 
+            : 'Документ готов';
+        
+        previewButtons.innerHTML = `
+            <button class="btn danger" onclick="hidePreview()">↩ Назад</button>
+            <button class="btn save" onclick="confirmAction()">✅ ${pendingAction === 'save' ? 'Сохранить' : 'Отправить'}</button>
+        `;
+    }
+
+    function hidePreview() {
+        previewModal.classList.remove('visible');
+        pendingAction = null;
+    }
+
+    async function confirmAction() {
+        hidePreview();
+        if (pendingAction === 'save') await savePDF();
+        else if (pendingAction === 'share') await sharePDF();
+        pendingAction = null;
+    }
+
+    async function savePDF() {
+        if (savedPages.length === 0) return;
+        try {
+            const blobs = savedPages.map(p => p.blob);
+            const blob = await generatePDFBlob(blobs);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'FreePDFShoot.pdf';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) { console.error(err); }
+    }
+
+    async function sharePDF() {
+        if (savedPages.length === 0) return;
+        try {
+            const blobs = savedPages.map(p => p.blob);
+            const blob = await generatePDFBlob(blobs);
+            const file = new File([blob], 'FreePDFShoot.pdf', { type: 'application/pdf' });
+            if (navigator.share) {
+                await navigator.share({ title: 'FreePDFShoot', text: 'Документ', files: [file] });
+            } else {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'FreePDFShoot.pdf';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        } catch (err) { if (err.name !== 'AbortError') console.error(err); }
+    }
+
+    async function generatePDFBlob(blobs) {
+        const images = [];
+        for (let i = 0; i < blobs.length; i++) {
+            const buf = await blobs[i].arrayBuffer();
+            images.push({ data: new Uint8Array(buf), dims: null });
+        }
+        for (let i = 0; i < images.length; i++) {
+            images[i].dims = await getJPEGDimensionsFromBlob(blobs[i]);
+        }
+        const pageW = 595, pageH = 842;
+        const parts = [], offsets = [];
+        let objNum = 1;
+        const imgObjNums = [], pageObjNums = [];
+        function addText(str) { parts.push(new TextEncoder().encode(str)); }
+        addText('%PDF-1.4\n');
+        for (const img of images) {
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            imgObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${img.dims.width} /Height ${img.dims.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/DCTDecode] /Length ${img.data.length} >>\nstream\n`);
+            parts.push(img.data);
+            addText('\nendstream\nendobj\n');
+            objNum++;
+        }
+        const kids = [];
+        for (let i = 0; i < images.length; i++) {
+            const img = images[i];
+            const scale = Math.min((pageW - 40) / img.dims.width, (pageH - 40) / img.dims.height);
+            const w = img.dims.width * scale, h = img.dims.height * scale;
+            const x = (pageW - w) / 2, y = (pageH - h) / 2;
+            const cont = `q ${w} 0 0 ${h} ${x} ${pageH - y - h} cm /Im${imgObjNums[i]} Do Q`;
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            pageObjNums.push(objNum);
+            addText(`${objNum} 0 obj\n<< /Type /Page /Parent ${objNum + 2} 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${objNum + 1} 0 R /Resources << /XObject << /Im${imgObjNums[i]} ${imgObjNums[i]} 0 R >> >> >>\nendobj\n`);
+            objNum++;
+            offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+            addText(`${objNum} 0 obj\n<< /Length ${cont.length} >>\nstream\n${cont}\nendstream\nendobj\n`);
+            objNum++;
+            kids.push(pageObjNums[i]);
+        }
+        const kidsStr = kids.map(k => `${k} 0 R`).join(' ');
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const pagesObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${kids.length} >>\nendobj\n`);
+        objNum++;
+        offsets.push(parts.reduce((acc, p) => acc + p.length, 0));
+        const catalogObjNum = objNum;
+        addText(`${objNum} 0 obj\n<< /Type /Catalog /Pages ${pagesObjNum} 0 R >>\nendobj\n`);
+        objNum++;
+        const xrefPos = parts.reduce((acc, p) => acc + p.length, 0);
+        addText(`xref\n0 ${objNum}\n0000000000 65535 f \n`);
+        for (const off of offsets) addText(`${String(off).padStart(10, '0')} 00000 n \n`);
+        addText(`trailer\n<< /Size ${objNum} /Root ${catalogObjNum} 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
+        const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const part of parts) { result.set(part, offset); offset += part.length; }
+        return new Blob([result], { type: 'application/pdf' });
+    }
+
+    async function getJPEGDimensionsFromBlob(blob) {
+        try {
+            const img = await createImageBitmap(blob);
+            const dims = { width: img.width, height: img.height };
+            img.close();
+            return dims;
+        } catch(e) {
+            return { width: 800, height: 600 };
+        }
     }
 
     window.addEventListener('beforeunload', () => {
