@@ -12,7 +12,7 @@
         html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; }
         .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; padding: 0 16px 20px; display: flex; gap: 8px; }
-        .btn { display: block; flex: 1; padding: 14px; font-size: 0.85rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; }
+        .btn { display: block; flex: 1; padding: 14px; font-size: 0.85rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; text-align: center; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; }
         .btn.danger { background: rgba(180,40,40,0.85); }
         .btn.save { background: #4caf50; }
@@ -71,7 +71,7 @@
         img.onload = () => {
             URL.revokeObjectURL(url);
             originalImage = img;
-            const MAX_DIM = 800;
+            const MAX_DIM = 1000;
             displayScale = 1;
             if (img.naturalWidth > MAX_DIM || img.naturalHeight > MAX_DIM) {
                 displayScale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
@@ -107,13 +107,14 @@
     }
 
     function updateUI() {
+        const n = savedPages.length;
         switch (currentStep) {
             case 'ready':
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
-                    ${savedPages.length > 0 ? `
-                        <button class="btn secondary" onclick="showPreview('share')">📤 (${savedPages.length})</button>
-                        <button class="btn save" onclick="showPreview('save')">💾</button>
+                    ${n > 0 ? `
+                        <button class="btn secondary" onclick="showPreview('share')">📤 ${n}</button>
+                        <button class="btn save" onclick="showPreview('save')">💾 ${n}</button>
                         <button class="btn danger" onclick="clearAllPages()">🗑</button>
                     ` : ''}
                 `;
@@ -132,8 +133,8 @@
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn save" onclick="showPreview('save')">💾</button>
-                    <button class="btn secondary" onclick="showPreview('share')">📤 (${savedPages.length})</button>
+                    <button class="btn save" onclick="showPreview('save')">💾 ${n}</button>
+                    <button class="btn secondary" onclick="showPreview('share')">📤 ${n}</button>
                 `;
                 break;
         }
@@ -268,11 +269,9 @@
         resetToReady();
     }
 
-    // ── ПРЕДПРОСМОТР ──
     function showPreview(action) {
         if (savedPages.length === 0) return;
         pendingAction = action;
-        
         const lastPage = savedPages[savedPages.length - 1];
         const img = new Image();
         img.onload = () => {
@@ -282,11 +281,9 @@
             previewModal.classList.add('visible');
         };
         img.src = lastPage.url;
-        
         previewTitle.textContent = savedPages.length > 1 
             ? `Документ готов (${savedPages.length} стр.)` 
             : 'Документ готов';
-        
         previewButtons.innerHTML = `
             <button class="btn danger" onclick="hidePreview()">↩ Назад</button>
             <button class="btn save" onclick="confirmAction()">✅ ${pendingAction === 'save' ? 'Сохранить' : 'Отправить'}</button>
@@ -415,4 +412,4 @@
     });
 </script>
 </body>
-    </html>
+</html>
