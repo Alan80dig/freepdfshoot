@@ -1,7 +1,7 @@
 const CACHE_NAME = 'freepdfshoot-v3';
 const urlsToCache = [
   '/freepdfshoot/',
-  '/freepdfshoot/index.html',
+  '/freepdfshoot/app.html',
   '/freepdfshoot/landing.html',
   '/freepdfshoot/manifest.json'
 ];
