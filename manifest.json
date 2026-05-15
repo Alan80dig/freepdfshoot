@@ -2,7 +2,7 @@
   "name": "FreePDFShoot – Приватный скан документов",
   "short_name": "FreePDFShoot",
   "description": "Бесплатный, приватный PDF-сканер без серверов и регистрации. Работает офлайн.",
-  "start_url": "/freepdfshoot/",
+ "start_url": "/freepdfshoot/app.html",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
