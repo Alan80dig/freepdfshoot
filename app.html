@@ -16,33 +16,17 @@
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; }
         .btn.danger { background: rgba(180,40,40,0.85); }
         .btn.save { background: #4caf50; }
-        .preview-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; background: rgba(0,0,0,0.85); display: none; flex-direction: column; align-items: center; justify-content: center; }
-        .preview-modal.visible { display: flex; }
-        .preview-modal canvas { position: relative; max-width: 90%; max-height: 60%; object-fit: contain; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
-        .preview-title { color: #fff; font-size: 1rem; font-weight: 600; margin-bottom: 16px; }
-        .preview-buttons { display: flex; gap: 8px; margin-top: 16px; padding: 0 16px; width: 100%; max-width: 400px; }
-        .preview-buttons .btn { flex: 1; }
     </style>
 </head>
 <body>
 <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
 <canvas id="canvas"></canvas>
 <div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
-<div class="preview-modal" id="previewModal">
-    <div class="preview-title" id="previewTitle">Предпросмотр PDF</div>
-    <canvas id="previewCanvas"></canvas>
-    <div class="preview-buttons" id="previewButtons"></div>
-</div>
 <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const actionArea = document.getElementById('actionArea');
     const cameraInput = document.getElementById('cameraInput');
-    const previewModal = document.getElementById('previewModal');
-    const previewCanvas = document.getElementById('previewCanvas');
-    const previewCtx = previewCanvas.getContext('2d');
-    const previewTitle = document.getElementById('previewTitle');
-    const previewButtons = document.getElementById('previewButtons');
 
     let currentStep = 'ready';
     let savedPages = [];
@@ -52,13 +36,19 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
-    let pendingAction = null;
+    // Для предпросмотра
+    let previewBlob = null;
+    let previewImageData = null;
+    let backupImageData = null;
+    let backupCorners = null;
+    let backupOriginalImage = null;
 
     function handleAction() {
         if (currentStep === 'saving') return;
         switch (currentStep) {
             case 'ready': cameraInput.click(); break;
-            case 'framing': cropAndSave(); break;
+            case 'framing': cropAndPreview(); break;
+            case 'preview': saveAfterPreview(); break;
             case 'saved': cameraInput.click(); break;
         }
     }
@@ -86,6 +76,7 @@
                 {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
             ];
             draggingCorner = -1;
+            previewBlob = null;
             currentStep = 'framing';
             updateUI();
             bindFramingEvents();
@@ -98,6 +89,8 @@
     function resetToReady() {
         unbindFramingEvents();
         frozenImageData = null;
+        previewBlob = null;
+        previewImageData = null;
         if (originalImage) { originalImage.src = ''; originalImage = null; }
         corners = null;
         draggingCorner = -1;
@@ -113,8 +106,8 @@
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
                     ${n > 0 ? `
-                        <button class="btn secondary" onclick="showPreview('share')">📤 ${n}</button>
-                        <button class="btn save" onclick="showPreview('save')">💾 ${n}</button>
+                        <button class="btn secondary" onclick="shareAll()">📤 ${n}</button>
+                        <button class="btn save" onclick="saveAll()">💾 ${n}</button>
                         <button class="btn danger" onclick="clearAllPages()">🗑</button>
                     ` : ''}
                 `;
@@ -126,6 +119,12 @@
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️</button>
                 `;
                 break;
+            case 'preview':
+                actionArea.innerHTML = `
+                    <button class="btn secondary" onclick="backToFraming()">↩ Назад</button>
+                    <button class="btn save" id="actionBtn" onclick="handleAction()">✅ Сохранить</button>
+                `;
+                break;
             case 'saving':
                 actionArea.innerHTML = `<button class="btn" disabled>⏳</button>`;
                 break;
@@ -133,8 +132,8 @@
                 actionArea.innerHTML = `
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
-                    <button class="btn save" onclick="showPreview('save')">💾 ${n}</button>
-                    <button class="btn secondary" onclick="showPreview('share')">📤 ${n}</button>
+                    <button class="btn save" onclick="saveAll()">💾 ${n}</button>
+                    <button class="btn secondary" onclick="shareAll()">📤 ${n}</button>
                 `;
                 break;
         }
@@ -149,6 +148,24 @@
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
+    }
+
+    function getCornersQuality(c) {
+        let perfect = 0, good = 0, bad = 0;
+        for (let i = 0; i < 4; i++) {
+            const prev = c[(i+3)%4], curr = c[i], next = c[(i+1)%4];
+            const v1 = { x: prev.x - curr.x, y: prev.y - curr.y };
+            const v2 = { x: next.x - curr.x, y: next.y - curr.y };
+            const dot = v1.x*v2.x + v1.y*v2.y;
+            const cross = v1.x*v2.y - v1.y*v2.x;
+            const angle = Math.abs(Math.atan2(cross, dot) * 180 / Math.PI);
+            if (angle > 88 && angle < 92) perfect++;
+            else if (angle > 80 && angle < 100) good++;
+            else bad++;
+        }
+        if (perfect === 4) return 'perfect';
+        if (bad > 0) return 'bad';
+        return 'good';
     }
 
     function drawFrozenScene() {
@@ -166,13 +183,15 @@
         ctx.closePath(); ctx.clip();
         ctx.putImageData(frozenImageData, 0, 0);
         ctx.restore();
-        ctx.strokeStyle = '#2a6df4'; ctx.lineWidth = 3;
+        const quality = getCornersQuality(corners);
+        const col = quality === 'perfect' ? '#00ff88' : quality === 'good' ? '#ffdd57' : '#ff4444';
+        ctx.strokeStyle = col; ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.stroke();
         [TL, TR, BR, BL].forEach((c, i) => {
-            ctx.fillStyle = '#2a6df4'; ctx.beginPath();
+            ctx.fillStyle = col; ctx.beginPath();
             ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
             ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui';
@@ -195,7 +214,6 @@
             }
         }
     }
-
     function onFramingTouchMove(e) {
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
@@ -206,7 +224,6 @@
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
     }
-
     function onFramingTouchEnd(e) { draggingCorner = -1; }
 
     function resetCrop() {
@@ -218,24 +235,15 @@
         drawFrozenScene();
     }
 
-    function cropAndSave() {
+    function cropAndPreview() {
         if (currentStep !== 'framing') return;
-        currentStep = 'saving';
-        updateUI();
-        unbindFramingEvents();
         const [TL, TR, BR, BL] = corners;
         const minX = Math.max(0, Math.min(TL.x, BL.x));
         const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
         const minY = Math.max(0, Math.min(TL.y, TR.y));
         const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
-        const cropW = maxX - minX;
-        const cropH = maxY - minY;
-        if (cropW < 10 || cropH < 10) {
-            currentStep = 'framing';
-            bindFramingEvents();
-            updateUI();
-            return;
-        }
+        const cropW = maxX - minX, cropH = maxY - minY;
+        if (cropW < 10 || cropH < 10) return;
         const invScale = 1 / displayScale;
         const tmpCanvas = document.createElement('canvas');
         tmpCanvas.width = Math.round(cropW * invScale);
@@ -243,15 +251,69 @@
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         tmpCanvas.toBlob(blob => {
-            if (!blob) { currentStep = 'framing'; bindFramingEvents(); updateUI(); return; }
-            const url = URL.createObjectURL(blob);
-            savedPages.push({ url, blob });
-            frozenImageData = null;
-            if (originalImage) { originalImage.src = ''; originalImage = null; }
-            corners = null;
-            currentStep = 'saved';
-            updateUI();
+            if (!blob) return;
+            previewBlob = blob;
+            // Сохраняем резервную копию для возврата
+            backupImageData = frozenImageData;
+            backupCorners = corners.map(c => ({x:c.x, y:c.y}));
+            backupOriginalImage = originalImage;
+            // Показываем обрезанное изображение
+            const img = new Image();
+            img.onload = () => {
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                ctx.drawImage(img, 0, 0);
+                previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                frozenImageData = previewImageData;
+                corners = null;
+                unbindFramingEvents();
+                currentStep = 'preview';
+                updateUI();
+                drawPreviewScene();
+            };
+            img.src = URL.createObjectURL(blob);
         }, 'image/jpeg', 0.92);
+    }
+
+    function drawPreviewScene() {
+        if (!previewImageData) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(previewImageData, 0, 0);
+    }
+
+    function backToFraming() {
+        if (!backupImageData || !backupCorners || !backupOriginalImage) return;
+        frozenImageData = backupImageData;
+        corners = backupCorners;
+        originalImage = backupOriginalImage;
+        canvas.width = frozenImageData.width;
+        canvas.height = frozenImageData.height;
+        previewBlob = null;
+        previewImageData = null;
+        backupImageData = null;
+        backupCorners = null;
+        backupOriginalImage = null;
+        currentStep = 'framing';
+        updateUI();
+        bindFramingEvents();
+        drawFrozenScene();
+    }
+
+    function saveAfterPreview() {
+        if (!previewBlob) return;
+        const url = URL.createObjectURL(previewBlob);
+        savedPages.push({ url, blob: previewBlob });
+        frozenImageData = null;
+        previewBlob = null;
+        previewImageData = null;
+        backupImageData = null;
+        backupCorners = null;
+        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
+        if (originalImage) { originalImage.src = ''; originalImage = null; }
+        originalImage = null;
+        corners = null;
+        currentStep = 'saved';
+        updateUI();
     }
 
     function removeLastPage() {
@@ -269,41 +331,7 @@
         resetToReady();
     }
 
-    function showPreview(action) {
-        if (savedPages.length === 0) return;
-        pendingAction = action;
-        const lastPage = savedPages[savedPages.length - 1];
-        const img = new Image();
-        img.onload = () => {
-            previewCanvas.width = img.naturalWidth;
-            previewCanvas.height = img.naturalHeight;
-            previewCtx.drawImage(img, 0, 0);
-            previewModal.classList.add('visible');
-        };
-        img.src = lastPage.url;
-        previewTitle.textContent = savedPages.length > 1 
-            ? `Документ готов (${savedPages.length} стр.)` 
-            : 'Документ готов';
-        previewButtons.innerHTML = `
-            <button class="btn danger" onclick="hidePreview()">↩ Назад</button>
-            <button class="btn save" onclick="confirmAction()">✅ ${pendingAction === 'save' ? 'Сохранить' : 'Отправить'}</button>
-        `;
-    }
-
-    function hidePreview() {
-        previewModal.classList.remove('visible');
-        pendingAction = null;
-    }
-
-    async function confirmAction() {
-        previewModal.classList.remove('visible');
-        if (pendingAction === 'save') await savePDF();
-        else if (pendingAction === 'share') await sharePDF();
-        pendingAction = null;
-        updateUI();
-    }
-
-    async function savePDF() {
+    async function saveAll() {
         if (savedPages.length === 0) return;
         try {
             const blobs = savedPages.map(p => p.blob);
@@ -316,7 +344,7 @@
         } catch (err) { console.error(err); }
     }
 
-    async function sharePDF() {
+    async function shareAll() {
         if (savedPages.length === 0) return;
         try {
             const blobs = savedPages.map(p => p.blob);
