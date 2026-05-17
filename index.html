@@ -9,97 +9,84 @@
     <title>FreePDFShoot – Приватный PDF-сканер</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; overflow-x: hidden; background: #f8f6f0; color: #2c2416; font-family: system-ui, -apple-system, sans-serif; }
+        html, body { width: 100%; overflow-x: hidden; background: #284028; color: #a8c8a8; font-family: system-ui, -apple-system, sans-serif; }
         body { display: flex; flex-direction: column; align-items: center; }
 
         .container { max-width: 800px; width: 100%; padding: 0 16px; }
 
-        /* Mobile hint */
-        .mobile-hint { text-align: center; padding: 12px 0 0; font-size: 0.7rem; color: #b8a99a; }
-        .mobile-hint span { display: inline-block; background: rgba(42,109,244,0.08); color: #2a6df4; padding: 4px 10px; border-radius: 10px; margin-right: 4px; }
+        .mobile-hint { text-align: center; padding: 12px 0 0; font-size: 0.7rem; color: #809880; }
+        .mobile-hint span { display: inline-block; background: rgba(76,175,80,0.12); color: #4caf50; padding: 4px 10px; border-radius: 10px; margin-right: 4px; }
 
-        /* Hero */
         .hero { text-align: center; padding: 40px 0 30px; }
-        .hero .badge { display: inline-block; background: rgba(76,175,80,0.12); color: #388e3c; font-size: 0.75rem; font-weight: 600; padding: 6px 16px; border-radius: 20px; margin-bottom: 20px; letter-spacing: 0.04em; }
-        .hero h1 { font-size: 2.2rem; font-weight: 700; color: #1a1309; margin-bottom: 12px; line-height: 1.2; }
-        .hero .sub { font-size: 1rem; color: #6b5d4f; margin-bottom: 32px; line-height: 1.6; max-width: 500px; margin-left: auto; margin-right: auto; }
+        .hero .badge { display: inline-block; background: rgba(76,175,80,0.12); color: #4caf50; font-size: 0.75rem; font-weight: 600; padding: 6px 16px; border-radius: 20px; margin-bottom: 20px; letter-spacing: 0.04em; }
+        .hero h1 { font-size: 2.2rem; font-weight: 700; color: #d0e8d0; margin-bottom: 12px; line-height: 1.2; }
+        .hero .sub { font-size: 1rem; color: #a8c8a8; margin-bottom: 32px; line-height: 1.6; max-width: 500px; margin-left: auto; margin-right: auto; }
         .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-        .btn { display: inline-block; padding: 14px 28px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; text-decoration: none; color: #fff; background: #2a6df4; transition: 0.2s; }
+        .btn { display: inline-block; padding: 14px 28px; font-size: 1rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; text-decoration: none; color: #fff; background: #4caf50; transition: 0.2s; }
         .btn:active { opacity: 0.85; }
-        .btn.outline { background: transparent; border: 2px solid #2a6df4; color: #2a6df4; }
+        .btn.outline { background: transparent; border: 2px solid #4caf50; color: #4caf50; }
 
-        /* Trust strip */
-        .trust { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 0 0 35px; font-size: 0.75rem; color: #8b7b6b; }
+        .trust { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 0 0 35px; font-size: 0.75rem; color: #809880; }
         .trust span { display: flex; align-items: center; gap: 5px; }
 
-        /* Steps */
-        .section-title { font-size: 1.4rem; font-weight: 700; color: #1a1309; text-align: center; margin-bottom: 6px; }
-        .section-sub { font-size: 0.85rem; color: #8b7b6b; text-align: center; margin-bottom: 24px; }
+        .section-title { font-size: 1.4rem; font-weight: 700; color: #d0e8d0; text-align: center; margin-bottom: 6px; }
+        .section-sub { font-size: 0.85rem; color: #809880; text-align: center; margin-bottom: 24px; }
         .steps { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 45px; }
-        .step { flex: 1; min-width: 150px; max-width: 200px; text-align: center; padding: 20px 16px; background: #fff; border-radius: 16px; border: 1px solid #e8e0d5; transition: 0.3s; }
-        .step:hover { border-color: #2a6df4; box-shadow: 0 4px 16px rgba(42,109,244,0.08); }
+        .step { flex: 1; min-width: 150px; max-width: 200px; text-align: center; padding: 20px 16px; background: #2e482e; border-radius: 16px; border: 1px solid #3a5a3a; transition: 0.3s; }
+        .step:hover { border-color: #4caf50; box-shadow: 0 4px 16px rgba(76,175,80,0.1); }
         .step .icon { font-size: 2.2rem; margin-bottom: 12px; }
-        .step h3 { font-size: 0.9rem; color: #1a1309; margin-bottom: 6px; }
-        .step p { font-size: 0.75rem; color: #8b7b6b; line-height: 1.5; }
+        .step h3 { font-size: 0.9rem; color: #d0e8d0; margin-bottom: 6px; }
+        .step p { font-size: 0.75rem; color: #a8c8a8; line-height: 1.5; }
 
-        /* Screenshots */
         .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 0 0 45px; }
-        .screenshots .shot { background: #fff; border-radius: 16px; overflow: hidden; border: 1px solid #e8e0d5; }
+        .screenshots .shot { background: #2e482e; border-radius: 16px; overflow: hidden; border: 1px solid #3a5a3a; }
         .screenshots img { width: 100%; display: block; }
-        .screenshots .caption { text-align: center; font-size: 0.7rem; color: #8b7b6b; padding: 8px; }
+        .screenshots .caption { text-align: center; font-size: 0.7rem; color: #809880; padding: 8px; }
 
-        /* Security */
         .security { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 0 0 45px; }
-        .security-item { flex: 1; min-width: 160px; max-width: 220px; text-align: center; padding: 20px 16px; background: #fff; border-radius: 16px; border: 1px solid #e8e0d5; }
+        .security-item { flex: 1; min-width: 160px; max-width: 220px; text-align: center; padding: 20px 16px; background: #2e482e; border-radius: 16px; border: 1px solid #3a5a3a; }
         .security-item .icon { font-size: 1.6rem; margin-bottom: 10px; }
-        .security-item h4 { font-size: 0.85rem; color: #1a1309; margin-bottom: 6px; }
-        .security-item p { font-size: 0.75rem; color: #8b7b6b; line-height: 1.5; }
+        .security-item h4 { font-size: 0.85rem; color: #d0e8d0; margin-bottom: 6px; }
+        .security-item p { font-size: 0.75rem; color: #a8c8a8; line-height: 1.5; }
 
-        /* Browser setup */
-        .setup { max-width: 650px; margin: 0 auto 45px; background: #fff; border-radius: 16px; padding: 24px; border: 1px solid #e8e0d5; }
+        .setup { max-width: 650px; margin: 0 auto 45px; background: #2e482e; border-radius: 16px; padding: 24px; border: 1px solid #3a5a3a; }
         .setup-inner { display: flex; align-items: center; gap: 20px; justify-content: center; flex-wrap: wrap; }
         .setup img { max-width: 200px; border-radius: 12px; }
         .setup .setup-text { flex: 1; min-width: 200px; }
-        .setup .setup-text p { color: #5c4f3f; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.5; }
-        .setup ol { color: #8b7b6b; font-size: 0.8rem; line-height: 2; padding-left: 20px; margin: 0; }
-        .setup ol li strong { color: #1a1309; }
+        .setup .setup-text p { color: #a8c8a8; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.5; }
+        .setup ol { color: #809880; font-size: 0.8rem; line-height: 2; padding-left: 20px; margin: 0; }
+        .setup ol li strong { color: #d0e8d0; }
 
-        /* CTA */
         .cta { text-align: center; padding: 30px 0 40px; }
-        .cta h2 { font-size: 1.5rem; color: #1a1309; margin-bottom: 10px; }
-        .cta p { font-size: 0.9rem; color: #8b7b6b; margin-bottom: 24px; }
+        .cta h2 { font-size: 1.5rem; color: #d0e8d0; margin-bottom: 10px; }
+        .cta p { font-size: 0.9rem; color: #a8c8a8; margin-bottom: 24px; }
         .cta .btn { padding: 16px 36px; font-size: 1.1rem; }
 
-        /* Support */
         .support { text-align: center; padding: 20px 0 35px; }
-        .support p { font-size: 0.8rem; color: #8b7b6b; margin-bottom: 12px; }
+        .support p { font-size: 0.8rem; color: #809880; margin-bottom: 12px; }
         .support img { height: 28px; }
 
-        /* Footer */
-        .footer { text-align: center; padding: 25px 0 20px; font-size: 0.75rem; color: #b8a99a; border-top: 1px solid #e8e0d5; }
-        .footer a { color: #2a6df4; text-decoration: none; }
+        .footer { text-align: center; padding: 25px 0 20px; font-size: 0.75rem; color: #809880; border-top: 1px solid #3a5a3a; }
+        .footer a { color: #4caf50; text-decoration: none; }
     </style>
 </head>
 <body>
 <div class="container">
 
-    <!-- Mobile hint -->
     <div class="mobile-hint">
         <span>📱 Оптимизировано для телефона</span> Откройте на смартфоне для лучшего опыта
     </div>
 
-    <!-- Hero -->
     <div class="hero">
         <div class="badge">🔒 100% ПРИВАТНОСТЬ</div>
         <h1>Твой карманный<br>PDF-сканер</h1>
-        <div class="sub">Сфоткай документ, обрежь лишнее и отправь PDF — и всё это <strong>без серверов, без регистрации, без сливов</strong>. Ни один байт не покинет телефон.</div>
+        <div class="sub">Сфоткай документ, обрежь лишнее и отправь PDF — и всё это <strong style="color:#d0e8d0;">без серверов, без регистрации, без сливов</strong>. Ни один байт не покинет телефон.</div>
         <div class="hero-buttons">
             <a class="btn" href="/freepdfshoot/app.html">🚀 Запустить</a>
             <button class="btn outline" id="installBtn" onclick="installPWA()" style="display:none;">📲 Установить</button>
         </div>
     </div>
 
-    <!-- Trust strip -->
     <div class="trust">
         <span>🔒 Никаких серверов</span>
         <span>📱 Только твой телефон</span>
@@ -107,7 +94,6 @@
         <span>🆓 Бесплатно навсегда</span>
     </div>
 
-    <!-- Steps -->
     <div class="section-title">Как это работает</div>
     <div class="section-sub">Три простых шага — и PDF готов к отправке</div>
     <div class="steps">
@@ -128,7 +114,6 @@
         </div>
     </div>
 
-    <!-- Screenshots -->
     <div class="section-title">Как выглядит</div>
     <div class="section-sub">Чистый, быстрый, без лишнего</div>
     <div class="screenshots">
@@ -138,7 +123,6 @@
         <div class="shot"><img src="screenshots/forward.jpg" alt="Отправка"><div class="caption">Отправка PDF</div></div>
     </div>
 
-    <!-- Security -->
     <div class="section-title">Твои документы — только твои</div>
     <div class="section-sub">Никто, кроме тебя, не увидит твои сканы</div>
     <div class="security">
@@ -159,7 +143,6 @@
         </div>
     </div>
 
-    <!-- Browser setup -->
     <div class="section-title">Если камера не включается</div>
     <div class="section-sub">Обычно браузер спрашивает сам, но если нет — вот решение</div>
     <div class="setup">
@@ -178,22 +161,19 @@
         </div>
     </div>
 
-    <!-- CTA -->
     <div class="cta">
         <h2>Готов попробовать?</h2>
         <p>Никаких установок, никаких регистраций. Просто открой и пользуйся.</p>
         <a class="btn" href="/freepdfshoot/app.html">🚀 Запустить бесплатно</a>
     </div>
 
-    <!-- Support -->
     <div class="support">
         <p>Нравится проект? Поддержи автора через СБП 👇</p>
-        <a href="screenshots/my_QR_copy.png" target="_blank">
+        <a href="docs/screenshots/my_QR_copy.png" target="_blank">
             <img src="https://img.shields.io/badge/Поддержать-СБП-34A853?logo=googlepay&logoColor=white&style=for-the-badge" alt="Поддержать через СБП">
         </a>
     </div>
 
-    <!-- Footer -->
     <div class="footer">
         Бесплатно. Навсегда. Без рекламы.<br>
         <a href="https://github.com/alan80dig/freepdfshoot" target="_blank">GitHub</a> • MIT License
