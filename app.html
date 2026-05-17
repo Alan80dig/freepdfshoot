@@ -11,17 +11,23 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; }
-        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; padding: 0 16px 20px; display: flex; gap: 8px; }
+        .action-area { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; padding: 0 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+        .btn-row { display: flex; gap: 8px; }
         .btn { display: block; flex: 1; padding: 14px; font-size: 0.85rem; font-weight: 600; border: none; border-radius: 14px; cursor: pointer; background: #2a6df4; color: #fff; text-align: center; }
         .btn.secondary { background: rgba(51,51,51,0.85); color: #ccc; }
         .btn.danger { background: rgba(180,40,40,0.85); }
         .btn.save { background: #4caf50; }
+        .hints { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 0 4px; }
+        .hint { flex: 1; min-width: 80px; max-width: 140px; text-align: center; padding: 10px 4px; background: rgba(255,255,255,0.06); border-radius: 14px; }
+        .hint .icon { font-size: 1.8rem; margin-bottom: 4px; }
+        .hint .label { font-size: 0.7rem; color: #ccc; line-height: 1.3; }
+        .legend { text-align: center; font-size: 0.65rem; color: #888; padding: 0 4px 4px; line-height: 1.5; }
     </style>
 </head>
 <body>
 <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" onchange="onSystemPhoto(event)">
 <canvas id="canvas"></canvas>
-<div class="action-area" id="actionArea"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>
+<div class="action-area" id="actionArea"></div>
 <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -36,12 +42,13 @@
     const HANDLE_SIZE = 44;
     let originalImage = null;
     let displayScale = 1;
-    // Для предпросмотра
     let previewBlob = null;
     let previewImageData = null;
     let backupImageData = null;
     let backupCorners = null;
     let backupOriginalImage = null;
+
+    updateUI();
 
     function handleAction() {
         if (currentStep === 'saving') return;
@@ -101,42 +108,51 @@
 
     function updateUI() {
         const n = savedPages.length;
+        let html = '';
         switch (currentStep) {
             case 'ready':
-                actionArea.innerHTML = `
-                    <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button>
-                    ${n > 0 ? `
+                html = `
+                    <div class="hints">
+                        <div class="hint"><div class="icon">📸</div><div class="label">Сфоткайте<br>документ</div></div>
+                        <div class="hint"><div class="icon">✂️</div><div class="label">Обрежьте<br>лишнее</div></div>
+                        <div class="hint"><div class="icon">📤</div><div class="label">Отправьте<br>PDF</div></div>
+                    </div>
+                    <div class="legend">💡 Цвет рамки подскажет, насколько ровно стоят маркеры:<br>🟢 Ровно · 🟡 Почти · 🔴 Поправьте</div>
+                    <div class="btn-row"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>`;
+                if (n > 0) {
+                    html += `<div class="btn-row">
                         <button class="btn secondary" onclick="shareAll()">📤 ${n}</button>
                         <button class="btn save" onclick="saveAll()">💾 ${n}</button>
                         <button class="btn danger" onclick="clearAllPages()">🗑</button>
-                    ` : ''}
-                `;
+                    </div>`;
+                }
                 break;
             case 'framing':
-                actionArea.innerHTML = `
+                html = `<div class="btn-row">
                     <button class="btn secondary" onclick="resetCrop()">↺</button>
                     <button class="btn danger" onclick="resetToReady()">↩</button>
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️</button>
-                `;
+                </div>`;
                 break;
             case 'preview':
-                actionArea.innerHTML = `
+                html = `<div class="btn-row">
                     <button class="btn secondary" onclick="backToFraming()">↩ Назад</button>
-                    <button class="btn save" id="actionBtn" onclick="handleAction()">✅ Вперед</button>
-                `;
+                    <button class="btn save" id="actionBtn" onclick="handleAction()">✅ Дальше</button>
+                </div>`;
                 break;
             case 'saving':
-                actionArea.innerHTML = `<button class="btn" disabled>⏳</button>`;
+                html = `<div class="btn-row"><button class="btn" disabled>⏳</button></div>`;
                 break;
             case 'saved':
-                actionArea.innerHTML = `
+                html = `<div class="btn-row">
                     <button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять ещё</button>
                     <button class="btn danger" onclick="removeLastPage()">🗑</button>
                     <button class="btn save" onclick="saveAll()">💾 ${n}</button>
                     <button class="btn secondary" onclick="shareAll()">📤 ${n}</button>
-                `;
+                </div>`;
                 break;
         }
+        actionArea.innerHTML = html;
     }
 
     function bindFramingEvents() {
@@ -237,6 +253,7 @@
 
     function cropAndPreview() {
         if (currentStep !== 'framing') return;
+        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
         const [TL, TR, BR, BL] = corners;
         const minX = Math.max(0, Math.min(TL.x, BL.x));
         const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
@@ -253,11 +270,9 @@
         tmpCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
-            // Сохраняем резервную копию для возврата
             backupImageData = frozenImageData;
             backupCorners = corners.map(c => ({x:c.x, y:c.y}));
             backupOriginalImage = originalImage;
-            // Показываем обрезанное изображение
             const img = new Image();
             img.onload = () => {
                 canvas.width = img.naturalWidth;
