@@ -60,26 +60,24 @@
         }
     }
 
-   function normalizeOrientation(img) {
-    if (img.naturalWidth <= img.naturalHeight) return img;
-    const MAX_DIM = 1500;
-    let scale = 1;
-    if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
-        scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
-    }
-    const tmpCanvas = document.createElement('canvas');
-    tmpCanvas.width = Math.round(img.naturalHeight * scale);
-    tmpCanvas.height = Math.round(img.naturalWidth * scale);
-    const tmpCtx = tmpCanvas.getContext('2d');
-    tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
-    tmpCtx.rotate(Math.PI / 2);
-    tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-    const newImg = new Image();
-    return new Promise(resolve => {
-        newImg.onload = () => resolve(newImg);
+    function normalizeOrientation(img) {
+        if (img.naturalWidth <= img.naturalHeight) return img;
+        const MAX_DIM = 1500;
+        let scale = 1;
+        if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
+            scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+        }
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = Math.round(img.naturalHeight * scale);
+        tmpCanvas.height = Math.round(img.naturalWidth * scale);
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
+        tmpCtx.rotate(Math.PI / 2);
+        tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        const newImg = new Image();
         newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
-    });
-}
+        return new Promise(resolve => { newImg.onload = () => resolve(newImg); });
+    }
 
     async function onSystemPhoto(event) {
         const file = event.target.files[0];
@@ -272,6 +270,30 @@
         drawFrozenScene();
     }
 
+    function enhanceContrast(canvas, amount) {
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+        let min = 255, max = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            const gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+            if (gray < min) min = gray;
+            if (gray > max) max = gray;
+        }
+        if (max - min < 10) return canvas;
+        const expand = (max - min) * (amount / 100);
+        const newMin = Math.max(0, min - expand);
+        const newMax = Math.min(255, max + expand);
+        const range = newMax - newMin || 1;
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = (data[i] - newMin) * 255 / range;
+            data[i+1] = (data[i+1] - newMin) * 255 / range;
+            data[i+2] = (data[i+2] - newMin) * 255 / range;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        return canvas;
+    }
+
     function cropAndPreview() {
         if (currentStep !== 'framing') return;
         if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
@@ -288,6 +310,7 @@
         tmpCanvas.height = Math.round(cropH * invScale);
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
+        enhanceContrast(tmpCanvas, 30);
         tmpCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
