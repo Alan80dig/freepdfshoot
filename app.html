@@ -60,27 +60,26 @@
         }
     }
 
-    function normalizeOrientation(img) {
-        // Если изображение портретное — возвращаем как есть
-        if (img.naturalWidth <= img.naturalHeight) return img;
-        // Альбомное — поворачиваем без двойного сжатия
-        const MAX_DIM = 1500;
-        let scale = 1;
-        if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
-            scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
-        }
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = Math.round(img.naturalHeight * scale);
-        tmpCanvas.height = Math.round(img.naturalWidth * scale);
-        const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
-        tmpCtx.rotate(Math.PI / 2);
-        tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-        // Возвращаем canvas как новый Image без перекодирования в JPEG
-        const newImg = new Image();
-        newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
-        return new Promise(resolve => { newImg.onload = () => resolve(newImg); });
+   function normalizeOrientation(img) {
+    if (img.naturalWidth <= img.naturalHeight) return img;
+    const MAX_DIM = 1500;
+    let scale = 1;
+    if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
+        scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
     }
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = Math.round(img.naturalHeight * scale);
+    tmpCanvas.height = Math.round(img.naturalWidth * scale);
+    const tmpCtx = tmpCanvas.getContext('2d');
+    tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
+    tmpCtx.rotate(Math.PI / 2);
+    tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    const newImg = new Image();
+    return new Promise(resolve => {
+        newImg.onload = () => resolve(newImg);
+        newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
+    });
+}
 
     async function onSystemPhoto(event) {
         const file = event.target.files[0];
