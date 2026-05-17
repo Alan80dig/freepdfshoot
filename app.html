@@ -60,22 +60,44 @@
         }
     }
 
-    function onSystemPhoto(event) {
+    function normalizeOrientation(img) {
+        // Если изображение портретное — возвращаем как есть
+        if (img.naturalWidth <= img.naturalHeight) return img;
+        // Альбомное — поворачиваем без двойного сжатия
+        const MAX_DIM = 1500;
+        let scale = 1;
+        if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
+            scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+        }
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = Math.round(img.naturalHeight * scale);
+        tmpCanvas.height = Math.round(img.naturalWidth * scale);
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
+        tmpCtx.rotate(Math.PI / 2);
+        tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        // Возвращаем canvas как новый Image без перекодирования в JPEG
+        const newImg = new Image();
+        newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
+        return new Promise(resolve => { newImg.onload = () => resolve(newImg); });
+    }
+
+    async function onSystemPhoto(event) {
         const file = event.target.files[0];
         if (!file) return;
         const url = URL.createObjectURL(file);
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
             URL.revokeObjectURL(url);
-            originalImage = img;
+            originalImage = await normalizeOrientation(img);
             const MAX_DIM = 1000;
             displayScale = 1;
-            if (img.naturalWidth > MAX_DIM || img.naturalHeight > MAX_DIM) {
-                displayScale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+            if (originalImage.naturalWidth > MAX_DIM || originalImage.naturalHeight > MAX_DIM) {
+                displayScale = MAX_DIM / Math.max(originalImage.naturalWidth, originalImage.naturalHeight);
             }
-            canvas.width = Math.round(img.naturalWidth * displayScale);
-            canvas.height = Math.round(img.naturalHeight * displayScale);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            canvas.width = Math.round(originalImage.naturalWidth * displayScale);
+            canvas.height = Math.round(originalImage.naturalHeight * displayScale);
+            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
             corners = [
