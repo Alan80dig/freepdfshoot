@@ -244,15 +244,42 @@
         });
     }
 
+    // Вычисляет реальную область отображения изображения внутри canvas
+    function getImageRect() {
+        const r = canvas.getBoundingClientRect();
+        const canvasRatio = canvas.width / canvas.height;
+        const containerRatio = r.width / r.height;
+        let drawWidth, drawHeight, offsetX, offsetY;
+
+        if (canvasRatio > containerRatio) {
+            // Изображение шире контейнера — ограничено по ширине
+            drawWidth = r.width;
+            drawHeight = r.width / canvasRatio;
+            offsetX = 0;
+            offsetY = (r.height - drawHeight) / 2;
+        } else {
+            // Изображение выше контейнера — ограничено по высоте
+            drawHeight = r.height;
+            drawWidth = r.height * canvasRatio;
+            offsetX = (r.width - drawWidth) / 2;
+            offsetY = 0;
+        }
+
+        return { drawWidth, drawHeight, offsetX, offsetY, rect: r };
+    }
+
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
         e.preventDefault();
         const t = e.touches[0];
-        const r = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / r.width;
-        const scaleY = canvas.height / r.height;
-        const sx = (t.clientX - r.left) * scaleX;
-        const sy = (t.clientY - r.top) * scaleY;
+        const img = getImageRect();
+        
+        // Пересчитываем координаты касания в пиксели canvas, учитывая letterboxing
+        const scaleX = canvas.width / img.drawWidth;
+        const scaleY = canvas.height / img.drawHeight;
+        const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
+        const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
+        
         if (!corners) return;
 
         let bestIdx = -1;
@@ -276,11 +303,13 @@
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
         const t = e.touches[0];
-        const r = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / r.width;
-        const scaleY = canvas.height / r.height;
-        const sx = (t.clientX - r.left) * scaleX;
-        const sy = (t.clientY - r.top) * scaleY;
+        const img = getImageRect();
+        
+        const scaleX = canvas.width / img.drawWidth;
+        const scaleY = canvas.height / img.drawHeight;
+        const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
+        const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
+        
         corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
