@@ -39,7 +39,9 @@
     let frozenImageData = null;
     let corners = null;
     let draggingCorner = -1;
-    const HANDLE_SIZE = 44;
+    const HANDLE_SIZE = 44;           // визуальный диаметр
+    const HANDLE_RADIUS = HANDLE_SIZE / 2; // визуальный радиус (22px)
+    const HIT_TARGET = HANDLE_SIZE;        // зона захвата (44px от центра)
     let originalImage = null;
     let displayScale = 1;
     let previewBlob = null;
@@ -226,40 +228,70 @@
         ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
         ctx.closePath(); ctx.stroke();
         [TL, TR, BR, BL].forEach((c, i) => {
-            ctx.fillStyle = col; ctx.beginPath();
-            ctx.arc(c.x, c.y, HANDLE_SIZE/2, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-            ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui';
-            ctx.textAlign = 'center'; ctx.fillText(i+1, c.x, c.y+5);
+            const isDragging = (i === draggingCorner);
+            const r = isDragging ? HANDLE_RADIUS * 1.5 : HANDLE_RADIUS;
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = isDragging ? 4 : 3;
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${isDragging ? 14 : 12}px system-ui`;
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, c.x, c.y + (isDragging ? 6 : 5));
         });
     }
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
         e.preventDefault();
-        const t = e.touches[0], r = canvas.getBoundingClientRect();
-        const sx = (t.clientX - r.left) * (canvas.width / r.width);
-        const sy = (t.clientY - r.top) * (canvas.height / r.height);
+        const t = e.touches[0];
+        const r = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / r.width;
+        const scaleY = canvas.height / r.height;
+        const sx = (t.clientX - r.left) * scaleX;
+        const sy = (t.clientY - r.top) * scaleY;
         if (!corners) return;
+
+        let bestIdx = -1;
+        let bestDist = Infinity;
         for (let i = 0; i < corners.length; i++) {
-            const dx = sx - corners[i].x, dy = sy - corners[i].y;
-            if (Math.sqrt(dx*dx + dy*dy) < HANDLE_SIZE * 2) {
-                draggingCorner = i;
-                return;
+            const dx = sx - corners[i].x;
+            const dy = sy - corners[i].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < HIT_TARGET && dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
             }
         }
+        if (bestIdx >= 0) {
+            draggingCorner = bestIdx;
+            drawFrozenScene();
+        }
     }
+
     function onFramingTouchMove(e) {
         if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
-        const t = e.touches[0], r = canvas.getBoundingClientRect();
-        const sx = (t.clientX - r.left) * (canvas.width / r.width);
-        const sy = (t.clientY - r.top) * (canvas.height / r.height);
+        const t = e.touches[0];
+        const r = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / r.width;
+        const scaleY = canvas.height / r.height;
+        const sx = (t.clientX - r.left) * scaleX;
+        const sy = (t.clientY - r.top) * scaleY;
         corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
     }
-    function onFramingTouchEnd(e) { draggingCorner = -1; }
+
+    function onFramingTouchEnd(e) {
+        if (draggingCorner >= 0) {
+            draggingCorner = -1;
+            drawFrozenScene();
+        }
+    }
 
     function resetCrop() {
         const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
@@ -294,6 +326,19 @@
         return canvas;
     }
 
+    function scaleToOutput(canvas) {
+        const MAX_OUTPUT = 1600;
+        const w = canvas.width, h = canvas.height;
+        if (Math.max(w, h) <= MAX_OUTPUT) return canvas;
+        const scale = MAX_OUTPUT / Math.max(w, h);
+        const out = document.createElement('canvas');
+        out.width = Math.round(w * scale);
+        out.height = Math.round(h * scale);
+        const outCtx = out.getContext('2d');
+        outCtx.drawImage(canvas, 0, 0, out.width, out.height);
+        return out;
+    }
+
     function cropAndPreview() {
         if (currentStep !== 'framing') return;
         if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
@@ -311,7 +356,8 @@
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         enhanceContrast(tmpCanvas, 30);
-        tmpCanvas.toBlob(blob => {
+        const finalCanvas = scaleToOutput(tmpCanvas);
+        finalCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
             backupImageData = frozenImageData;
