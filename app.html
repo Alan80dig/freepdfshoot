@@ -200,13 +200,15 @@
         canvas.removeEventListener('touchend', onFramingTouchEnd);
     }
 
-    function bindPreviewEvents() {
+     function bindPreviewEvents() {
+        canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onPreviewTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onPreviewTouchMove, { passive: false });
         canvas.addEventListener('touchend', onPreviewTouchEnd);
         canvas.addEventListener('dblclick', onPreviewDoubleTap);
     }
     function unbindPreviewEvents() {
+        canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onPreviewTouchStart);
         canvas.removeEventListener('touchmove', onPreviewTouchMove);
         canvas.removeEventListener('touchend', onPreviewTouchEnd);
@@ -379,6 +381,7 @@
     // ── Zoom в предпросмотре ──
     function onPreviewTouchStart(e) {
         if (currentStep !== 'preview') return;
+        e.preventDefault();
         if (e.touches.length === 2) {
             const r = canvas.getBoundingClientRect();
             const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
@@ -390,13 +393,18 @@
             previewPinchMidY = (y1 + y2) / 2;
             return;
         }
-        previewDragging = true;
+        if (e.touches.length === 1) {
+            const r = canvas.getBoundingClientRect();
+            previewPinchMidX = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
+            previewPinchMidY = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
+            previewDragging = true;
+        }
     }
 
     function onPreviewTouchMove(e) {
         if (currentStep !== 'preview') return;
+        e.preventDefault();
         if (e.touches.length === 2) {
-            e.preventDefault();
             const r = canvas.getBoundingClientRect();
             const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
             const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
@@ -405,14 +413,11 @@
             const dist = Math.hypot(x2 - x1, y2 - y1);
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
-            if (previewPinchDist && previewPinchMidX) {
+            if (previewPinchDist > 0) {
                 const scale = dist / previewPinchDist;
                 const newZoom = Math.max(1, Math.min(5, previewZoom * scale));
-                previewPanX += (midX - previewPinchMidX);
-                previewPanY += (midY - previewPinchMidY);
-                const maxPan = canvas.width * (newZoom - 1) / 2;
-                previewPanX = Math.max(-maxPan, Math.min(maxPan, previewPanX));
-                previewPanY = Math.max(-maxPan, Math.min(maxPan, previewPanY));
+                previewPanX = (previewPanX + midX) * (newZoom / previewZoom) - midX;
+                previewPanY = (previewPanY + midY) * (newZoom / previewZoom) - midY;
                 previewZoom = newZoom;
             }
             previewPinchDist = dist;
@@ -421,13 +426,14 @@
             drawPreviewScene();
             return;
         }
-        if (previewDragging && e.touches.length === 1) {
-            e.preventDefault();
+        if (previewDragging && e.touches.length === 1 && previewZoom > 1) {
             const r = canvas.getBoundingClientRect();
             const sx = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
             const sy = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
-            previewPanX += sx - (previewPinchMidX || sx);
-            previewPanY += sy - (previewPinchMidY || sy);
+            if (previewPinchMidX) {
+                previewPanX += sx - previewPinchMidX;
+                previewPanY += sy - previewPinchMidY;
+            }
             previewPinchMidX = sx;
             previewPinchMidY = sy;
             const maxPan = canvas.width * (previewZoom - 1) / 2;
@@ -448,6 +454,7 @@
 
     function onPreviewDoubleTap(e) {
         if (currentStep !== 'preview') return;
+        e.preventDefault();
         previewZoom = 1;
         previewPanX = 0;
         previewPanY = 0;
