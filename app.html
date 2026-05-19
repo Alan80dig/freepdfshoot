@@ -411,45 +411,56 @@
     }
 
     function cropAndPreview() {
-        if (currentStep !== 'framing') return;
-        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
-        const [TL, TR, BR, BL] = corners;
-        const minX = Math.max(0, Math.min(TL.x, BL.x));
-        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
-        const minY = Math.max(0, Math.min(TL.y, TR.y));
-        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
-        const cropW = maxX - minX, cropH = maxY - minY;
-        if (cropW < 10 || cropH < 10) return;
-        const invScale = 1 / displayScale;
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = Math.round(cropW * invScale);
-        tmpCanvas.height = Math.round(cropH * invScale);
-        const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
-        enhanceContrast(tmpCanvas, 30);
-        const finalCanvas = scaleToOutput(tmpCanvas);
-        finalCanvas.toBlob(blob => {
-            if (!blob) return;
-            previewBlob = blob;
-            backupImageData = frozenImageData;
-            backupCorners = corners.map(c => ({x:c.x, y:c.y}));
-            backupOriginalImage = originalImage;
-            const img = new Image();
-            img.onload = () => {
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                ctx.drawImage(img, 0, 0);
-                previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                frozenImageData = previewImageData;
-                corners = null;
-                unbindFramingEvents();
-                currentStep = 'preview';
-                updateUI();
-                drawPreviewScene();
-            };
-            img.src = URL.createObjectURL(blob);
-        }, 'image/jpeg', 0.92);
-    }
+    if (currentStep !== 'framing') return;
+    if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
+    const [TL, TR, BR, BL] = corners;
+    const rawMinX = Math.max(0, Math.min(TL.x, BL.x));
+    const rawMaxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
+    const rawMinY = Math.max(0, Math.min(TL.y, TR.y));
+    const rawMaxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
+    const rawCropW = rawMaxX - rawMinX;
+    const rawCropH = rawMaxY - rawMinY;
+    if (rawCropW < 10 || rawCropH < 10) return;
+    
+    // Адаптивный отступ: не более радиуса маркера и не более 5% от размера
+    const inset = Math.min(HANDLE_RADIUS, rawCropW * 0.05, rawCropH * 0.05);
+    const minX = rawMinX + inset;
+    const maxX = rawMaxX - inset;
+    const minY = rawMinY + inset;
+    const maxY = rawMaxY - inset;
+    const cropW = maxX - minX;
+    const cropH = maxY - minY;
+    
+    const invScale = 1 / displayScale;
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = Math.round(cropW * invScale);
+    tmpCanvas.height = Math.round(cropH * invScale);
+    const tmpCtx = tmpCanvas.getContext('2d');
+    tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
+    enhanceContrast(tmpCanvas, 30);
+    const finalCanvas = scaleToOutput(tmpCanvas);
+    finalCanvas.toBlob(blob => {
+        if (!blob) return;
+        previewBlob = blob;
+        backupImageData = frozenImageData;
+        backupCorners = corners.map(c => ({x:c.x, y:c.y}));
+        backupOriginalImage = originalImage;
+        const img = new Image();
+        img.onload = () => {
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+            previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            frozenImageData = previewImageData;
+            corners = null;
+            unbindFramingEvents();
+            currentStep = 'preview';
+            updateUI();
+            drawPreviewScene();
+        };
+        img.src = URL.createObjectURL(blob);
+    }, 'image/jpeg', 0.92);
+}
 
     function drawPreviewScene() {
         if (!previewImageData) return;
