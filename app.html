@@ -37,28 +37,20 @@
     let currentStep = 'ready';
     let savedPages = [];
     let frozenImageData = null;
+    let corners = null;
+    let draggingCorner = -1;
+    const HANDLE_SIZE = 44;
+    const HANDLE_RADIUS = HANDLE_SIZE / 2;
+    const HIT_TARGET = HANDLE_SIZE;
+    const LOUPE_SIZE = 120;
+    const LOUPE_ZOOM = 3;
     let originalImage = null;
     let displayScale = 1;
-
-    // Трансформации изображения
-    let imgX = 0, imgY = 0;   // смещение изображения
-    let imgZoom = 1;           // масштаб
-    let imgRotation = 0;       // угол поворота
-
-    // Для жестов
-    let lastPinchDist = 0;
-    let lastPinchMidX = 0, lastPinchMidY = 0;
-    let lastPinchAngle = 0;
-    let dragging = false;
-    let dragStartX = 0, dragStartY = 0;
-    let imgStartX = 0, imgStartY = 0;
-
-    // Рамка (фиксированные пропорции А4: 1:√2)
-    const FRAME_RATIO = Math.sqrt(2); // высота/ширина ≈ 1.414
-    let frameW, frameH, frameX, frameY;
-
     let previewBlob = null;
     let previewImageData = null;
+    let backupImageData = null;
+    let backupCorners = null;
+    let backupOriginalImage = null;
 
     updateUI();
 
@@ -70,20 +62,6 @@
             case 'preview': saveAfterPreview(); break;
             case 'saved': cameraInput.click(); break;
         }
-    }
-
-    function calcFrame() {
-        const w = canvas.width, h = canvas.height;
-        const maxW = w * 0.85, maxH = h * 0.85;
-        if (maxW * FRAME_RATIO <= maxH) {
-            frameW = maxW;
-            frameH = maxW * FRAME_RATIO;
-        } else {
-            frameH = maxH;
-            frameW = maxH / FRAME_RATIO;
-        }
-        frameX = (w - frameW) / 2;
-        frameY = (h - frameH) / 2;
     }
 
     async function onSystemPhoto(event) {
@@ -101,18 +79,19 @@
             }
             canvas.width = Math.round(img.naturalWidth * displayScale);
             canvas.height = Math.round(img.naturalHeight * displayScale);
-            calcFrame();
-            // Центрируем изображение
-            imgX = (canvas.width - img.naturalWidth) / 2;
-            imgY = (canvas.height - img.naturalHeight) / 2;
-            imgZoom = 1;
-            imgRotation = 0;
-            frozenImageData = null;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
+            corners = [
+                {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
+                {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
+            ];
+            draggingCorner = -1;
             previewBlob = null;
             currentStep = 'framing';
             updateUI();
             bindFramingEvents();
-            drawFramingScene();
+            drawFrozenScene();
         };
         img.src = url;
         cameraInput.value = '';
@@ -124,6 +103,8 @@
         previewBlob = null;
         previewImageData = null;
         if (originalImage) { originalImage.src = ''; originalImage = null; }
+        corners = null;
+        draggingCorner = -1;
         currentStep = 'ready';
         updateUI();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -137,10 +118,10 @@
                 html = `
                     <div class="hints">
                         <div class="hint"><div class="icon">📸</div><div class="label">Сфоткайте документ</div></div>
-                        <div class="hint"><div class="icon">✂️</div><div class="label">Совместите с рамкой</div></div>
+                        <div class="hint"><div class="icon">✂️</div><div class="label">Обрежьте лишнее</div></div>
                         <div class="hint"><div class="icon">📤</div><div class="label">Отправьте PDF</div></div>
                     </div>
-                    <div class="legend">Двигайте изображение и совместите с рамкой</div>
+                    <div class="legend">💡 Цвет рамки подскажет, насколько ровно стоят маркеры:<br>🟢 Ровно · 🟡 Почти · 🔴 Поправьте</div>
                     <div class="btn-row"><button class="btn" id="actionBtn" onclick="handleAction()">📸 Снять</button></div>`;
                 if (n > 0) {
                     html += `<div class="btn-row">
@@ -152,7 +133,7 @@
                 break;
             case 'framing':
                 html = `<div class="btn-row">
-                    <button class="btn secondary" onclick="resetFrame()">↺</button>
+                    <button class="btn secondary" onclick="resetCrop()">↺</button>
                     <button class="btn danger" onclick="resetToReady()">↩</button>
                     <button class="btn" id="actionBtn" onclick="handleAction()">✂️</button>
                 </div>`;
@@ -179,148 +160,211 @@
     }
 
     function bindFramingEvents() {
-        canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onFramingTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onFramingTouchMove, { passive: false });
         canvas.addEventListener('touchend', onFramingTouchEnd);
     }
     function unbindFramingEvents() {
-        canvas.style.touchAction = '';
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
     }
 
-    function drawFramingScene() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Рисуем изображение с трансформациями
-        ctx.save();
-        ctx.translate(canvas.width/2 + imgX, canvas.height/2 + imgY);
-        ctx.rotate(imgRotation);
-        ctx.scale(imgZoom, imgZoom);
-        ctx.translate(-canvas.width/2, -canvas.height/2);
-        if (frozenImageData) {
-            ctx.putImageData(frozenImageData, 0, 0);
-        } else if (originalImage) {
-            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
-            frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    function getCornersQuality(c) {
+        let perfect = 0, good = 0, bad = 0;
+        for (let i = 0; i < 4; i++) {
+            const prev = c[(i+3)%4], curr = c[i], next = c[(i+1)%4];
+            const v1 = { x: prev.x - curr.x, y: prev.y - curr.y };
+            const v2 = { x: next.x - curr.x, y: next.y - curr.y };
+            const dot = v1.x*v2.x + v1.y*v2.y;
+            const cross = v1.x*v2.y - v1.y*v2.x;
+            const angle = Math.abs(Math.atan2(cross, dot) * 180 / Math.PI);
+            if (angle > 88 && angle < 92) perfect++;
+            else if (angle > 80 && angle < 100) good++;
+            else bad++;
         }
-        ctx.restore();
+        if (perfect === 4) return 'perfect';
+        if (bad > 0) return 'bad';
+        return 'good';
+    }
 
-        // Затемнение снаружи рамки
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    function getImageRect() {
+        const r = canvas.getBoundingClientRect();
+        const canvasRatio = canvas.width / canvas.height;
+        const containerRatio = r.width / r.height;
+        let drawWidth, drawHeight, offsetX, offsetY;
+        if (canvasRatio > containerRatio) {
+            drawWidth = r.width;
+            drawHeight = r.width / canvasRatio;
+            offsetX = 0;
+            offsetY = (r.height - drawHeight) / 2;
+        } else {
+            drawHeight = r.height;
+            drawWidth = r.height * canvasRatio;
+            offsetX = (r.width - drawWidth) / 2;
+            offsetY = 0;
+        }
+        return { drawWidth, drawHeight, offsetX, offsetY, rect: r };
+    }
+
+    function drawFrozenScene() {
+        if (!frozenImageData) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(frozenImageData, 0, 0);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.clearRect(frameX, frameY, frameW, frameH);
-
-        // Рамка
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(frameX, frameY, frameW, frameH);
-
-        // Угловые акценты
-        const cornerLen = 20;
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 4;
-        [
-            [frameX, frameY, 1, 1], [frameX+frameW, frameY, -1, 1],
-            [frameX, frameY+frameH, 1, -1], [frameX+frameW, frameY+frameH, -1, -1]
-        ].forEach(([cx, cy, dx, dy]) => {
+        if (!corners) return;
+        const [TL, TR, BR, BL] = corners;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
+        ctx.closePath(); ctx.clip();
+        ctx.putImageData(frozenImageData, 0, 0);
+        ctx.restore();
+        const quality = getCornersQuality(corners);
+        const col = quality === 'perfect' ? '#00ff88' : quality === 'good' ? '#ffdd57' : '#ff4444';
+        ctx.strokeStyle = col; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(TL.x, TL.y); ctx.lineTo(TR.x, TR.y);
+        ctx.lineTo(BR.x, BR.y); ctx.lineTo(BL.x, BL.y);
+        ctx.closePath(); ctx.stroke();
+        [TL, TR, BR, BL].forEach((c, i) => {
+            const isDragging = (i === draggingCorner);
+            const r = isDragging ? HANDLE_RADIUS * 1.5 : HANDLE_RADIUS;
+            ctx.fillStyle = col;
             ctx.beginPath();
-            ctx.moveTo(cx, cy + cornerLen*dy);
-            ctx.lineTo(cx, cy);
-            ctx.lineTo(cx + cornerLen*dx, cy);
+            ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = isDragging ? 4 : 3;
             ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${isDragging ? 14 : 12}px system-ui`;
+            ctx.textAlign = 'center';
+            ctx.fillText(i + 1, c.x, c.y + (isDragging ? 6 : 5));
         });
+
+        if (draggingCorner >= 0 && corners) {
+            const cx = corners[draggingCorner].x;
+            const cy = corners[draggingCorner].y;
+            const halfSrc = (LOUPE_SIZE / 2) / LOUPE_ZOOM;
+            const loupeX = cx < canvas.width / 2 ? canvas.width - LOUPE_SIZE - 20 : 20;
+            const loupeY = cy < canvas.height / 2 ? canvas.height - LOUPE_SIZE - 100 : 80;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
+
+            const offscreen = document.createElement('canvas');
+            offscreen.width = canvas.width;
+            offscreen.height = canvas.height;
+            offscreen.getContext('2d').putImageData(frozenImageData, 0, 0);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE);
+            ctx.clip();
+            ctx.drawImage(offscreen, cx - halfSrc, cy - halfSrc, halfSrc * 2, halfSrc * 2, loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE);
+            ctx.restore();
+
+            const centerX = loupeX + LOUPE_SIZE / 2;
+            const centerY = loupeY + LOUPE_SIZE / 2;
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+            ctx.beginPath();
+            ctx.moveTo(centerX - 15, centerY);
+            ctx.lineTo(centerX + 15, centerY);
+            ctx.moveTo(centerX, centerY - 15);
+            ctx.lineTo(centerX, centerY + 15);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
     }
 
     function onFramingTouchStart(e) {
         if (currentStep !== 'framing') return;
         e.preventDefault();
-        if (e.touches.length === 1) {
-            dragging = true;
-            dragStartX = e.touches[0].clientX;
-            dragStartY = e.touches[0].clientY;
-            imgStartX = imgX;
-            imgStartY = imgY;
-        } else if (e.touches.length === 2) {
-            dragging = false;
-            const r = canvas.getBoundingClientRect();
-            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
-            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
-            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
-            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
-            lastPinchDist = Math.hypot(x2 - x1, y2 - y1);
-            lastPinchMidX = (x1 + x2) / 2;
-            lastPinchMidY = (y1 + y2) / 2;
-            lastPinchAngle = Math.atan2(y2 - y1, x2 - x1);
+        const t = e.touches[0];
+        const img = getImageRect();
+        const scaleX = canvas.width / img.drawWidth;
+        const scaleY = canvas.height / img.drawHeight;
+        const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
+        const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
+        if (!corners) return;
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        for (let i = 0; i < corners.length; i++) {
+            const dx = sx - corners[i].x;
+            const dy = sy - corners[i].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < HIT_TARGET && dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+            }
+        }
+        if (bestIdx >= 0) {
+            draggingCorner = bestIdx;
+            drawFrozenScene();
         }
     }
 
     function onFramingTouchMove(e) {
-        if (currentStep !== 'framing') return;
+        if (draggingCorner < 0 || !corners) return;
         e.preventDefault();
-        if (dragging && e.touches.length === 1) {
-            const dx = e.touches[0].clientX - dragStartX;
-            const dy = e.touches[0].clientY - dragStartY;
-            imgX = imgStartX + dx * (canvas.width / canvas.clientWidth);
-            imgY = imgStartY + dy * (canvas.height / canvas.clientHeight);
-            drawFramingScene();
-        } else if (e.touches.length === 2) {
-            const r = canvas.getBoundingClientRect();
-            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
-            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
-            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
-            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
-            const dist = Math.hypot(x2 - x1, y2 - y1);
-            const midX = (x1 + x2) / 2;
-            const midY = (y1 + y2) / 2;
-            const angle = Math.atan2(y2 - y1, x2 - x1);
-
-            if (lastPinchDist > 0) {
-                const scale = dist / lastPinchDist;
-                imgZoom = Math.max(0.5, Math.min(3, imgZoom * scale));
-                imgX += (midX - lastPinchMidX);
-                imgY += (midY - lastPinchMidY);
-            }
-            if (lastPinchAngle !== undefined) {
-                imgRotation += angle - lastPinchAngle;
-            }
-            lastPinchDist = dist;
-            lastPinchMidX = midX;
-            lastPinchMidY = midY;
-            lastPinchAngle = angle;
-            drawFramingScene();
-        }
+        const t = e.touches[0];
+        const img = getImageRect();
+        const scaleX = canvas.width / img.drawWidth;
+        const scaleY = canvas.height / img.drawHeight;
+        const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
+        const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
+        corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
+        corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
+        drawFrozenScene();
     }
 
     function onFramingTouchEnd(e) {
-        dragging = false;
-        lastPinchDist = 0;
+        if (draggingCorner >= 0) {
+            draggingCorner = -1;
+            drawFrozenScene();
+        }
     }
 
-    function resetFrame() {
-        imgX = 0;
-        imgY = 0;
-        imgZoom = 1;
-        imgRotation = 0;
-        drawFramingScene();
+    function resetCrop() {
+        const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
+        corners = [
+            {x:mX, y:mY}, {x:canvas.width - mX, y:mY},
+            {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
+        ];
+        drawFrozenScene();
     }
 
-        function cropAndPreview() {
+    function cropAndPreview() {
         if (currentStep !== 'framing') return;
-
-        // Вырезаем область рамки напрямую из canvas
-        const imgData = ctx.getImageData(frameX, frameY, frameW, frameH);
+        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
+        const [TL, TR, BR, BL] = corners;
+        const inset = HANDLE_RADIUS;
+        const minX = Math.max(0, Math.min(TL.x, BL.x) + inset);
+        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x) - inset);
+        const minY = Math.max(0, Math.min(TL.y, TR.y) + inset);
+        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y) - inset);
+        const cropW = maxX - minX, cropH = maxY - minY;
+        if (cropW < 10 || cropH < 10) return;
+        const invScale = 1 / displayScale;
         const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = frameW;
-        tmpCanvas.height = frameH;
-        tmpCanvas.getContext('2d').putImageData(imgData, 0, 0);
-
+        tmpCanvas.width = Math.round(cropW * invScale);
+        tmpCanvas.height = Math.round(cropH * invScale);
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         tmpCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
-            unbindFramingEvents();
+            backupImageData = frozenImageData;
+            backupCorners = corners.map(c => ({x:c.x, y:c.y}));
+            backupOriginalImage = originalImage;
             const img = new Image();
             img.onload = () => {
                 canvas.width = img.naturalWidth;
@@ -328,6 +372,8 @@
                 ctx.drawImage(img, 0, 0);
                 previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 frozenImageData = previewImageData;
+                corners = null;
+                unbindFramingEvents();
                 currentStep = 'preview';
                 updateUI();
                 drawPreviewScene();
@@ -343,15 +389,21 @@
     }
 
     function backToFraming() {
-        if (!originalImage) return;
-        frozenImageData = null;
+        if (!backupImageData || !backupCorners || !backupOriginalImage) return;
+        frozenImageData = backupImageData;
+        corners = backupCorners;
+        originalImage = backupOriginalImage;
+        canvas.width = frozenImageData.width;
+        canvas.height = frozenImageData.height;
         previewBlob = null;
         previewImageData = null;
-        calcFrame();
+        backupImageData = null;
+        backupCorners = null;
+        backupOriginalImage = null;
         currentStep = 'framing';
         updateUI();
         bindFramingEvents();
-        drawFramingScene();
+        drawFrozenScene();
     }
 
     function saveAfterPreview() {
@@ -361,8 +413,12 @@
         frozenImageData = null;
         previewBlob = null;
         previewImageData = null;
+        backupImageData = null;
+        backupCorners = null;
+        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
         if (originalImage) { originalImage.src = ''; originalImage = null; }
         originalImage = null;
+        corners = null;
         currentStep = 'saved';
         updateUI();
     }
