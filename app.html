@@ -266,24 +266,19 @@
             ctx.fillText(i + 1, c.x, c.y + (isDragging ? 6 : 5));
         });
 
-        // Лупа с перекрестием                
         if (draggingCorner >= 0 && corners) {
             const cx = corners[draggingCorner].x;
             const cy = corners[draggingCorner].y;
             const halfSrc = (LOUPE_SIZE / 2) / LOUPE_ZOOM;
-
-            // Позиция лупы — противоположный угол
             const loupeX = cx < canvas.width / 2 ? canvas.width - LOUPE_SIZE - 20 : 20;
             const loupeY = cy < canvas.height / 2 ? canvas.height - LOUPE_SIZE - 100 : 80;
 
-            // Рамка лупы
             ctx.fillStyle = 'rgba(0,0,0,0.8)';
             ctx.fillRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
             ctx.strokeStyle = '#00ff88';
             ctx.lineWidth = 2;
             ctx.strokeRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
 
-            // Увеличенное изображение с offscreen canvas (вместо drawImage(canvas))
             const offscreen = document.createElement('canvas');
             offscreen.width = canvas.width;
             offscreen.height = canvas.height;
@@ -292,14 +287,9 @@
             ctx.beginPath();
             ctx.rect(loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE);
             ctx.clip();
-            ctx.drawImage(
-                offscreen,
-                cx - halfSrc, cy - halfSrc, halfSrc * 2, halfSrc * 2,
-                loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE
-            );
+            ctx.drawImage(offscreen, cx - halfSrc, cy - halfSrc, halfSrc * 2, halfSrc * 2, loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE);
             ctx.restore();
 
-            // Перекрестие
             const centerX = loupeX + LOUPE_SIZE / 2;
             const centerY = loupeY + LOUPE_SIZE / 2;
             ctx.strokeStyle = '#00ff88';
@@ -373,17 +363,76 @@
         drawFrozenScene();
     }
 
-    function enhanceContrast(canvas, amount) {
-        const ctx = canvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    function makeTransparent(cvs, corners) {
+        const ctx = cvs.getContext('2d');
+        const scaleX = cvs.width / canvas.width;
+        const scaleY = cvs.height / canvas.height;
+        const mask = document.createElement('canvas');
+        mask.width = cvs.width;
+        mask.height = cvs.height;
+        const maskCtx = mask.getContext('2d');
+        maskCtx.beginPath();
+        maskCtx.moveTo(corners[0].x * scaleX, corners[0].y * scaleY);
+        maskCtx.lineTo(corners[1].x * scaleX, corners[1].y * scaleY);
+        maskCtx.lineTo(corners[2].x * scaleX, corners[2].y * scaleY);
+        maskCtx.lineTo(corners[3].x * scaleX, corners[3].y * scaleY);
+        maskCtx.closePath();
+        maskCtx.fill();
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(mask, 0, 0);
+        ctx.globalCompositeOperation = 'source-over';
+        return cvs;
+    }
+
+    function autoTrim(cvs) {
+        const ctx = cvs.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+        const data = imgData.data;
+        let top = cvs.height, bottom = 0, left = cvs.width, right = 0;
+        for (let y = 0; y < cvs.height; y++) {
+            for (let x = 0; x < cvs.width; x++) {
+                const idx = (y * cvs.width + x) * 4;
+                if (data[idx + 3] > 0) {
+                    if (y < top) top = y;
+                    if (y > bottom) bottom = y;
+                    if (x < left) left = x;
+                    if (x > right) right = x;
+                }
+            }
+        }
+        if (top > bottom || left > right) return cvs;
+        const cropW = right - left + 1;
+        const cropH = bottom - top + 1;
+        if (cropW < 10 || cropH < 10) return cvs;
+        const out = document.createElement('canvas');
+        out.width = cropW;
+        out.height = cropH;
+        out.getContext('2d').putImageData(imgData, -left, -top, left, top, cropW, cropH);
+        return out;
+    }
+
+    function flattenToWhite(cvs) {
+        const out = document.createElement('canvas');
+        out.width = cvs.width;
+        out.height = cvs.height;
+        const outCtx = out.getContext('2d');
+        outCtx.fillStyle = '#ffffff';
+        outCtx.fillRect(0, 0, out.width, out.height);
+        outCtx.drawImage(cvs, 0, 0);
+        return out;
+    }
+
+    function enhanceContrast(cvs, amount) {
+        const ctx = cvs.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
         const data = imgData.data;
         let min = 255, max = 0;
         for (let i = 0; i < data.length; i += 4) {
-            const gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+            const gray = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
             if (gray < min) min = gray;
             if (gray > max) max = gray;
         }
-        if (max - min < 10) return canvas;
+        if (max - min < 10) return cvs;
         const expand = (max - min) * (amount / 100);
         const newMin = Math.max(0, min - expand);
         const newMax = Math.min(255, max + expand);
@@ -394,73 +443,66 @@
             data[i+2] = (data[i+2] - newMin) * 255 / range;
         }
         ctx.putImageData(imgData, 0, 0);
-        return canvas;
+        return cvs;
     }
 
-    function scaleToOutput(canvas) {
+    function scaleToOutput(cvs) {
         const MAX_OUTPUT = 1600;
-        const w = canvas.width, h = canvas.height;
-        if (Math.max(w, h) <= MAX_OUTPUT) return canvas;
+        const w = cvs.width, h = cvs.height;
+        if (Math.max(w, h) <= MAX_OUTPUT) return cvs;
         const scale = MAX_OUTPUT / Math.max(w, h);
         const out = document.createElement('canvas');
         out.width = Math.round(w * scale);
         out.height = Math.round(h * scale);
-        const outCtx = out.getContext('2d');
-        outCtx.drawImage(canvas, 0, 0, out.width, out.height);
+        out.getContext('2d').drawImage(cvs, 0, 0, out.width, out.height);
         return out;
     }
 
     function cropAndPreview() {
-    if (currentStep !== 'framing') return;
-    if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
-    const [TL, TR, BR, BL] = corners;
-    const rawMinX = Math.max(0, Math.min(TL.x, BL.x));
-    const rawMaxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
-    const rawMinY = Math.max(0, Math.min(TL.y, TR.y));
-    const rawMaxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
-    const rawCropW = rawMaxX - rawMinX;
-    const rawCropH = rawMaxY - rawMinY;
-    if (rawCropW < 10 || rawCropH < 10) return;
-    
-    // Адаптивный отступ: не более радиуса маркера и не более 5% от размера
-    const inset = Math.min(HANDLE_RADIUS, rawCropW * 0.05, rawCropH * 0.05);
-    const minX = rawMinX + inset;
-    const maxX = rawMaxX - inset;
-    const minY = rawMinY + inset;
-    const maxY = rawMaxY - inset;
-    const cropW = maxX - minX;
-    const cropH = maxY - minY;
-    
-    const invScale = 1 / displayScale;
-    const tmpCanvas = document.createElement('canvas');
-    tmpCanvas.width = Math.round(cropW * invScale);
-    tmpCanvas.height = Math.round(cropH * invScale);
-    const tmpCtx = tmpCanvas.getContext('2d');
-    tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
-    enhanceContrast(tmpCanvas, 30);
-    const finalCanvas = scaleToOutput(tmpCanvas);
-    finalCanvas.toBlob(blob => {
-        if (!blob) return;
-        previewBlob = blob;
-        backupImageData = frozenImageData;
-        backupCorners = corners.map(c => ({x:c.x, y:c.y}));
-        backupOriginalImage = originalImage;
-        const img = new Image();
-        img.onload = () => {
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            ctx.drawImage(img, 0, 0);
-            previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            frozenImageData = previewImageData;
-            corners = null;
-            unbindFramingEvents();
-            currentStep = 'preview';
-            updateUI();
-            drawPreviewScene();
-        };
-        img.src = URL.createObjectURL(blob);
-    }, 'image/jpeg', 0.92);
-}
+        if (currentStep !== 'framing') return;
+        if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
+        const [TL, TR, BR, BL] = corners;
+        const inset = HANDLE_RADIUS;
+        const minX = Math.max(0, Math.min(TL.x, BL.x) + inset);
+        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x) - inset);
+        const minY = Math.max(0, Math.min(TL.y, TR.y) + inset);
+        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y) - inset);
+        const cropW = maxX - minX, cropH = maxY - minY;
+        if (cropW < 10 || cropH < 10) return;
+        const invScale = 1 / displayScale;
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = Math.round(cropW * invScale);
+        tmpCanvas.height = Math.round(cropH * invScale);
+        const tmpCtx = tmpCanvas.getContext('2d');
+        tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
+
+        makeTransparent(tmpCanvas, corners);
+        const trimmed = autoTrim(tmpCanvas);
+        enhanceContrast(trimmed, 30);
+        const flattened = flattenToWhite(trimmed);
+        const finalCanvas = scaleToOutput(flattened);
+        finalCanvas.toBlob(blob => {
+            if (!blob) return;
+            previewBlob = blob;
+            backupImageData = frozenImageData;
+            backupCorners = corners.map(c => ({x:c.x, y:c.y}));
+            backupOriginalImage = originalImage;
+            const img = new Image();
+            img.onload = () => {
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                ctx.drawImage(img, 0, 0);
+                previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                frozenImageData = previewImageData;
+                corners = null;
+                unbindFramingEvents();
+                currentStep = 'preview';
+                updateUI();
+                drawPreviewScene();
+            };
+            img.src = URL.createObjectURL(blob);
+        }, 'image/jpeg', 0.92);
+    }
 
     function drawPreviewScene() {
         if (!previewImageData) return;
