@@ -52,6 +52,13 @@
     let backupCorners = null;
     let backupOriginalImage = null;
 
+    // Zoom в предпросмотре
+    let previewZoom = 1;
+    let previewPanX = 0, previewPanY = 0;
+    let previewPinchDist = 0;
+    let previewPinchMidX = 0, previewPinchMidY = 0;
+    let previewDragging = false;
+
     updateUI();
 
     function handleAction() {
@@ -119,10 +126,12 @@
     }
 
     function resetToReady() {
+        unbindPreviewEvents();
         unbindFramingEvents();
         frozenImageData = null;
         previewBlob = null;
         previewImageData = null;
+        previewZoom = 1; previewPanX = 0; previewPanY = 0;
         if (originalImage) { originalImage.src = ''; originalImage = null; }
         corners = null;
         draggingCorner = -1;
@@ -189,6 +198,19 @@
         canvas.removeEventListener('touchstart', onFramingTouchStart);
         canvas.removeEventListener('touchmove', onFramingTouchMove);
         canvas.removeEventListener('touchend', onFramingTouchEnd);
+    }
+
+    function bindPreviewEvents() {
+        canvas.addEventListener('touchstart', onPreviewTouchStart, { passive: false });
+        canvas.addEventListener('touchmove', onPreviewTouchMove, { passive: false });
+        canvas.addEventListener('touchend', onPreviewTouchEnd);
+        canvas.addEventListener('dblclick', onPreviewDoubleTap);
+    }
+    function unbindPreviewEvents() {
+        canvas.removeEventListener('touchstart', onPreviewTouchStart);
+        canvas.removeEventListener('touchmove', onPreviewTouchMove);
+        canvas.removeEventListener('touchend', onPreviewTouchEnd);
+        canvas.removeEventListener('dblclick', onPreviewDoubleTap);
     }
 
     function getCornersQuality(c) {
@@ -354,6 +376,84 @@
         }
     }
 
+    // ── Zoom в предпросмотре ──
+    function onPreviewTouchStart(e) {
+        if (currentStep !== 'preview') return;
+        if (e.touches.length === 2) {
+            const r = canvas.getBoundingClientRect();
+            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
+            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
+            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
+            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
+            previewPinchDist = Math.hypot(x2 - x1, y2 - y1);
+            previewPinchMidX = (x1 + x2) / 2;
+            previewPinchMidY = (y1 + y2) / 2;
+            return;
+        }
+        previewDragging = true;
+    }
+
+    function onPreviewTouchMove(e) {
+        if (currentStep !== 'preview') return;
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const r = canvas.getBoundingClientRect();
+            const x1 = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
+            const y1 = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
+            const x2 = (e.touches[1].clientX - r.left) * (canvas.width / r.width);
+            const y2 = (e.touches[1].clientY - r.top) * (canvas.height / r.height);
+            const dist = Math.hypot(x2 - x1, y2 - y1);
+            const midX = (x1 + x2) / 2;
+            const midY = (y1 + y2) / 2;
+            if (previewPinchDist && previewPinchMidX) {
+                const scale = dist / previewPinchDist;
+                const newZoom = Math.max(1, Math.min(5, previewZoom * scale));
+                previewPanX += (midX - previewPinchMidX);
+                previewPanY += (midY - previewPinchMidY);
+                const maxPan = canvas.width * (newZoom - 1) / 2;
+                previewPanX = Math.max(-maxPan, Math.min(maxPan, previewPanX));
+                previewPanY = Math.max(-maxPan, Math.min(maxPan, previewPanY));
+                previewZoom = newZoom;
+            }
+            previewPinchDist = dist;
+            previewPinchMidX = midX;
+            previewPinchMidY = midY;
+            drawPreviewScene();
+            return;
+        }
+        if (previewDragging && e.touches.length === 1) {
+            e.preventDefault();
+            const r = canvas.getBoundingClientRect();
+            const sx = (e.touches[0].clientX - r.left) * (canvas.width / r.width);
+            const sy = (e.touches[0].clientY - r.top) * (canvas.height / r.height);
+            previewPanX += sx - (previewPinchMidX || sx);
+            previewPanY += sy - (previewPinchMidY || sy);
+            previewPinchMidX = sx;
+            previewPinchMidY = sy;
+            const maxPan = canvas.width * (previewZoom - 1) / 2;
+            previewPanX = Math.max(-maxPan, Math.min(maxPan, previewPanX));
+            previewPanY = Math.max(-maxPan, Math.min(maxPan, previewPanY));
+            drawPreviewScene();
+        }
+    }
+
+    function onPreviewTouchEnd(e) {
+        if (e.touches.length < 2) {
+            previewPinchDist = 0;
+            previewPinchMidX = 0;
+            previewPinchMidY = 0;
+        }
+        previewDragging = false;
+    }
+
+    function onPreviewDoubleTap(e) {
+        if (currentStep !== 'preview') return;
+        previewZoom = 1;
+        previewPanX = 0;
+        previewPanY = 0;
+        drawPreviewScene();
+    }
+
     function resetCrop() {
         const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
         corners = [
@@ -361,65 +461,6 @@
             {x:canvas.width - mX, y:canvas.height - mY}, {x:mX, y:canvas.height - mY}
         ];
         drawFrozenScene();
-    }
-
-    function makeTransparent(cvs, corners) {
-        const ctx = cvs.getContext('2d');
-        const scaleX = cvs.width / canvas.width;
-        const scaleY = cvs.height / canvas.height;
-        const mask = document.createElement('canvas');
-        mask.width = cvs.width;
-        mask.height = cvs.height;
-        const maskCtx = mask.getContext('2d');
-        maskCtx.beginPath();
-        maskCtx.moveTo(corners[0].x * scaleX, corners[0].y * scaleY);
-        maskCtx.lineTo(corners[1].x * scaleX, corners[1].y * scaleY);
-        maskCtx.lineTo(corners[2].x * scaleX, corners[2].y * scaleY);
-        maskCtx.lineTo(corners[3].x * scaleX, corners[3].y * scaleY);
-        maskCtx.closePath();
-        maskCtx.fill();
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(mask, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        return cvs;
-    }
-
-    function autoTrim(cvs) {
-        const ctx = cvs.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-        const data = imgData.data;
-        let top = cvs.height, bottom = 0, left = cvs.width, right = 0;
-        for (let y = 0; y < cvs.height; y++) {
-            for (let x = 0; x < cvs.width; x++) {
-                const idx = (y * cvs.width + x) * 4;
-                if (data[idx + 3] > 0) {
-                    if (y < top) top = y;
-                    if (y > bottom) bottom = y;
-                    if (x < left) left = x;
-                    if (x > right) right = x;
-                }
-            }
-        }
-        if (top > bottom || left > right) return cvs;
-        const cropW = right - left + 1;
-        const cropH = bottom - top + 1;
-        if (cropW < 10 || cropH < 10) return cvs;
-        const out = document.createElement('canvas');
-        out.width = cropW;
-        out.height = cropH;
-        out.getContext('2d').putImageData(imgData, -left, -top, left, top, cropW, cropH);
-        return out;
-    }
-
-    function flattenToWhite(cvs) {
-        const out = document.createElement('canvas');
-        out.width = cvs.width;
-        out.height = cvs.height;
-        const outCtx = out.getContext('2d');
-        outCtx.fillStyle = '#ffffff';
-        outCtx.fillRect(0, 0, out.width, out.height);
-        outCtx.drawImage(cvs, 0, 0);
-        return out;
     }
 
     function enhanceContrast(cvs, amount) {
@@ -475,12 +516,8 @@
         tmpCanvas.height = Math.round(cropH * invScale);
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
-
-        makeTransparent(tmpCanvas, corners);
-        const trimmed = autoTrim(tmpCanvas);
-        enhanceContrast(trimmed, 30);
-        const flattened = flattenToWhite(trimmed);
-        const finalCanvas = scaleToOutput(flattened);
+        enhanceContrast(tmpCanvas, 30);
+        const finalCanvas = scaleToOutput(tmpCanvas);
         finalCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
@@ -495,9 +532,11 @@
                 previewImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 frozenImageData = previewImageData;
                 corners = null;
+                previewZoom = 1; previewPanX = 0; previewPanY = 0;
                 unbindFramingEvents();
                 currentStep = 'preview';
                 updateUI();
+                bindPreviewEvents();
                 drawPreviewScene();
             };
             img.src = URL.createObjectURL(blob);
@@ -507,11 +546,17 @@
     function drawPreviewScene() {
         if (!previewImageData) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(canvas.width/2 + previewPanX, canvas.height/2 + previewPanY);
+        ctx.scale(previewZoom, previewZoom);
+        ctx.translate(-canvas.width/2, -canvas.height/2);
         ctx.putImageData(previewImageData, 0, 0);
+        ctx.restore();
     }
 
     function backToFraming() {
         if (!backupImageData || !backupCorners || !backupOriginalImage) return;
+        unbindPreviewEvents();
         frozenImageData = backupImageData;
         corners = backupCorners;
         originalImage = backupOriginalImage;
@@ -519,6 +564,7 @@
         canvas.height = frozenImageData.height;
         previewBlob = null;
         previewImageData = null;
+        previewZoom = 1; previewPanX = 0; previewPanY = 0;
         backupImageData = null;
         backupCorners = null;
         backupOriginalImage = null;
@@ -530,11 +576,13 @@
 
     function saveAfterPreview() {
         if (!previewBlob) return;
+        unbindPreviewEvents();
         const url = URL.createObjectURL(previewBlob);
         savedPages.push({ url, blob: previewBlob });
         frozenImageData = null;
         previewBlob = null;
         previewImageData = null;
+        previewZoom = 1; previewPanX = 0; previewPanY = 0;
         backupImageData = null;
         backupCorners = null;
         if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
