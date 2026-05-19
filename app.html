@@ -200,7 +200,7 @@
         canvas.removeEventListener('touchend', onFramingTouchEnd);
     }
 
-     function bindPreviewEvents() {
+    function bindPreviewEvents() {
         canvas.style.touchAction = 'none';
         canvas.addEventListener('touchstart', onPreviewTouchStart, { passive: false });
         canvas.addEventListener('touchmove', onPreviewTouchMove, { passive: false });
@@ -470,39 +470,35 @@
         drawFrozenScene();
     }
 
-    function enhanceContrast(cvs, amount) {
+    function makeTransparent(cvs, corners) {
         const ctx = cvs.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-        const data = imgData.data;
-        let min = 255, max = 0;
-        for (let i = 0; i < data.length; i += 4) {
-            const gray = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-            if (gray < min) min = gray;
-            if (gray > max) max = gray;
-        }
-        if (max - min < 10) return cvs;
-        const expand = (max - min) * (amount / 100);
-        const newMin = Math.max(0, min - expand);
-        const newMax = Math.min(255, max + expand);
-        const range = newMax - newMin || 1;
-        for (let i = 0; i < data.length; i += 4) {
-            data[i] = (data[i] - newMin) * 255 / range;
-            data[i+1] = (data[i+1] - newMin) * 255 / range;
-            data[i+2] = (data[i+2] - newMin) * 255 / range;
-        }
-        ctx.putImageData(imgData, 0, 0);
+        const scaleX = cvs.width / canvas.width;
+        const scaleY = cvs.height / canvas.height;
+        const mask = document.createElement('canvas');
+        mask.width = cvs.width;
+        mask.height = cvs.height;
+        const maskCtx = mask.getContext('2d');
+        maskCtx.beginPath();
+        maskCtx.moveTo(corners[0].x * scaleX, corners[0].y * scaleY);
+        maskCtx.lineTo(corners[1].x * scaleX, corners[1].y * scaleY);
+        maskCtx.lineTo(corners[2].x * scaleX, corners[2].y * scaleY);
+        maskCtx.lineTo(corners[3].x * scaleX, corners[3].y * scaleY);
+        maskCtx.closePath();
+        maskCtx.fill();
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(mask, 0, 0);
+        ctx.globalCompositeOperation = 'source-over';
         return cvs;
     }
 
-    function scaleToOutput(cvs) {
-        const MAX_OUTPUT = 1600;
-        const w = cvs.width, h = cvs.height;
-        if (Math.max(w, h) <= MAX_OUTPUT) return cvs;
-        const scale = MAX_OUTPUT / Math.max(w, h);
+    function flattenToWhite(cvs) {
         const out = document.createElement('canvas');
-        out.width = Math.round(w * scale);
-        out.height = Math.round(h * scale);
-        out.getContext('2d').drawImage(cvs, 0, 0, out.width, out.height);
+        out.width = cvs.width;
+        out.height = cvs.height;
+        const outCtx = out.getContext('2d');
+        outCtx.fillStyle = '#ffffff';
+        outCtx.fillRect(0, 0, out.width, out.height);
+        outCtx.drawImage(cvs, 0, 0);
         return out;
     }
 
@@ -510,11 +506,10 @@
         if (currentStep !== 'framing') return;
         if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
         const [TL, TR, BR, BL] = corners;
-        const inset = HANDLE_RADIUS;
-        const minX = Math.max(0, Math.min(TL.x, BL.x) + inset);
-        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x) - inset);
-        const minY = Math.max(0, Math.min(TL.y, TR.y) + inset);
-        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y) - inset);
+        const minX = Math.max(0, Math.min(TL.x, BL.x));
+        const maxX = Math.min(canvas.width, Math.max(TR.x, BR.x));
+        const minY = Math.max(0, Math.min(TL.y, TR.y));
+        const maxY = Math.min(canvas.height, Math.max(BL.y, BR.y));
         const cropW = maxX - minX, cropH = maxY - minY;
         if (cropW < 10 || cropH < 10) return;
         const invScale = 1 / displayScale;
@@ -523,9 +518,12 @@
         tmpCanvas.height = Math.round(cropH * invScale);
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
-        enhanceContrast(tmpCanvas, 30);
-        const finalCanvas = scaleToOutput(tmpCanvas);
-        finalCanvas.toBlob(blob => {
+
+        // Обрезка строго по форме рамки
+        makeTransparent(tmpCanvas, corners);
+        const flattened = flattenToWhite(tmpCanvas);
+
+        flattened.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
             backupImageData = frozenImageData;
