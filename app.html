@@ -64,43 +64,22 @@
         }
     }
 
-    function normalizeOrientation(img) {
-        if (img.naturalWidth <= img.naturalHeight) return img;
-        const MAX_DIM = 1500;
-        let scale = 1;
-        if (Math.max(img.naturalWidth, img.naturalHeight) > MAX_DIM) {
-            scale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
-        }
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = Math.round(img.naturalHeight * scale);
-        tmpCanvas.height = Math.round(img.naturalWidth * scale);
-        const tmpCtx = tmpCanvas.getContext('2d');
-        tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
-        tmpCtx.rotate(Math.PI / 2);
-        tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-        const newImg = new Image();
-        return new Promise(resolve => {
-            newImg.onload = () => resolve(newImg);
-            newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
-        });
-    }
-
     async function onSystemPhoto(event) {
         const file = event.target.files[0];
         if (!file) return;
         const url = URL.createObjectURL(file);
         const img = new Image();
-        img.onload = async () => {
+        img.onload = () => {
             URL.revokeObjectURL(url);
-            originalImage = await normalizeOrientation(img);
-            const MAX_DIM = 1000;
+            originalImage = img;
+            const MAX_DIM = 1600;
             displayScale = 1;
-            if (originalImage.naturalWidth > MAX_DIM || originalImage.naturalHeight > MAX_DIM) {
-                displayScale = MAX_DIM / Math.max(originalImage.naturalWidth, originalImage.naturalHeight);
+            if (img.naturalWidth > MAX_DIM || img.naturalHeight > MAX_DIM) {
+                displayScale = MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
             }
-            canvas.width = Math.round(originalImage.naturalWidth * displayScale);
-            canvas.height = Math.round(originalImage.naturalHeight * displayScale);
-            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
+            canvas.width = Math.round(img.naturalWidth * displayScale);
+            canvas.height = Math.round(img.naturalHeight * displayScale);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             frozenImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const mX = canvas.width * 0.2, mY = canvas.height * 0.2;
             corners = [
@@ -399,6 +378,47 @@
         return out;
     }
 
+    function autoRotate(cvs, corners) {
+        const angle = Math.atan2(corners[3].y - corners[0].y, corners[3].x - corners[0].x) - Math.PI / 2;
+        if (Math.abs(angle) < 0.01) return cvs;
+        const w = cvs.width, h = cvs.height;
+        const diag = Math.ceil(Math.sqrt(w*w + h*h));
+        const out = document.createElement('canvas');
+        out.width = diag;
+        out.height = diag;
+        const outCtx = out.getContext('2d');
+        outCtx.translate(diag/2, diag/2);
+        outCtx.rotate(-angle);
+        outCtx.drawImage(cvs, -w/2, -h/2);
+
+        // Обрезаем чёрные углы после поворота
+        const imgData = outCtx.getImageData(0, 0, diag, diag);
+        const data = imgData.data;
+        let top = diag, bottom = 0, left = diag, right = 0;
+        for (let y = 0; y < diag; y++) {
+            for (let x = 0; x < diag; x++) {
+                const idx = (y * diag + x) * 4;
+                const gray = data[idx]*0.299 + data[idx+1]*0.587 + data[idx+2]*0.114;
+                if (gray > 20) { // не чёрный
+                    if (y < top) top = y;
+                    if (y > bottom) bottom = y;
+                    if (x < left) left = x;
+                    if (x > right) right = x;
+                }
+            }
+        }
+        const cropW = right - left + 1;
+        const cropH = bottom - top + 1;
+        if (cropW > 0 && cropH > 0 && (cropW < diag || cropH < diag)) {
+            const trimmed = document.createElement('canvas');
+            trimmed.width = cropW;
+            trimmed.height = cropH;
+            trimmed.getContext('2d').putImageData(imgData, -left, -top, left, top, cropW, cropH);
+            return trimmed;
+        }
+        return out;
+    }
+
     function cropAndPreview() {
         if (currentStep !== 'framing') return;
         if (backupOriginalImage) { backupOriginalImage.src = ''; backupOriginalImage = null; }
@@ -417,7 +437,14 @@
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.drawImage(originalImage, minX * invScale, minY * invScale, tmpCanvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
         enhanceContrast(tmpCanvas, 30);
-        const finalCanvas = scaleToOutput(tmpCanvas);
+
+        // Пересчитываем corners в координаты tmpCanvas
+        const scaledCorners = corners.map(c => ({
+            x: (c.x - minX) * invScale,
+            y: (c.y - minY) * invScale
+        }));
+        const rotated = autoRotate(tmpCanvas, scaledCorners);
+        const finalCanvas = scaleToOutput(rotated);
         finalCanvas.toBlob(blob => {
             if (!blob) return;
             previewBlob = blob;
