@@ -39,9 +39,11 @@
     let frozenImageData = null;
     let corners = null;
     let draggingCorner = -1;
-    const HANDLE_SIZE = 44;           // визуальный диаметр
-    const HANDLE_RADIUS = HANDLE_SIZE / 2; // визуальный радиус (22px)
-    const HIT_TARGET = HANDLE_SIZE;        // зона захвата (44px от центра)
+    const HANDLE_SIZE = 44;
+    const HANDLE_RADIUS = HANDLE_SIZE / 2;
+    const HIT_TARGET = HANDLE_SIZE;
+    const LOUPE_SIZE = 120;
+    const LOUPE_ZOOM = 3;
     let originalImage = null;
     let displayScale = 1;
     let previewBlob = null;
@@ -77,8 +79,10 @@
         tmpCtx.rotate(Math.PI / 2);
         tmpCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
         const newImg = new Image();
-        newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
-        return new Promise(resolve => { newImg.onload = () => resolve(newImg); });
+        return new Promise(resolve => {
+            newImg.onload = () => resolve(newImg);
+            newImg.src = tmpCanvas.toDataURL('image/jpeg', 0.92);
+        });
     }
 
     async function onSystemPhoto(event) {
@@ -205,6 +209,25 @@
         return 'good';
     }
 
+    function getImageRect() {
+        const r = canvas.getBoundingClientRect();
+        const canvasRatio = canvas.width / canvas.height;
+        const containerRatio = r.width / r.height;
+        let drawWidth, drawHeight, offsetX, offsetY;
+        if (canvasRatio > containerRatio) {
+            drawWidth = r.width;
+            drawHeight = r.width / canvasRatio;
+            offsetX = 0;
+            offsetY = (r.height - drawHeight) / 2;
+        } else {
+            drawHeight = r.height;
+            drawWidth = r.height * canvasRatio;
+            offsetX = (r.width - drawWidth) / 2;
+            offsetY = 0;
+        }
+        return { drawWidth, drawHeight, offsetX, offsetY, rect: r };
+    }
+
     function drawFrozenScene() {
         if (!frozenImageData) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -242,30 +265,55 @@
             ctx.textAlign = 'center';
             ctx.fillText(i + 1, c.x, c.y + (isDragging ? 6 : 5));
         });
-    }
 
-    // Вычисляет реальную область отображения изображения внутри canvas
-    function getImageRect() {
-        const r = canvas.getBoundingClientRect();
-        const canvasRatio = canvas.width / canvas.height;
-        const containerRatio = r.width / r.height;
-        let drawWidth, drawHeight, offsetX, offsetY;
+        // Лупа с перекрестием                
+        if (draggingCorner >= 0 && corners) {
+            const cx = corners[draggingCorner].x;
+            const cy = corners[draggingCorner].y;
+            const halfSrc = (LOUPE_SIZE / 2) / LOUPE_ZOOM;
 
-        if (canvasRatio > containerRatio) {
-            // Изображение шире контейнера — ограничено по ширине
-            drawWidth = r.width;
-            drawHeight = r.width / canvasRatio;
-            offsetX = 0;
-            offsetY = (r.height - drawHeight) / 2;
-        } else {
-            // Изображение выше контейнера — ограничено по высоте
-            drawHeight = r.height;
-            drawWidth = r.height * canvasRatio;
-            offsetX = (r.width - drawWidth) / 2;
-            offsetY = 0;
+            // Позиция лупы — противоположный угол
+            const loupeX = cx < canvas.width / 2 ? canvas.width - LOUPE_SIZE - 20 : 20;
+            const loupeY = cy < canvas.height / 2 ? canvas.height - LOUPE_SIZE - 100 : 80;
+
+            // Рамка лупы
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(loupeX - 2, loupeY - 2, LOUPE_SIZE + 4, LOUPE_SIZE + 4);
+
+            // Увеличенное изображение с offscreen canvas (вместо drawImage(canvas))
+            const offscreen = document.createElement('canvas');
+            offscreen.width = canvas.width;
+            offscreen.height = canvas.height;
+            offscreen.getContext('2d').putImageData(frozenImageData, 0, 0);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE);
+            ctx.clip();
+            ctx.drawImage(
+                offscreen,
+                cx - halfSrc, cy - halfSrc, halfSrc * 2, halfSrc * 2,
+                loupeX, loupeY, LOUPE_SIZE, LOUPE_SIZE
+            );
+            ctx.restore();
+
+            // Перекрестие
+            const centerX = loupeX + LOUPE_SIZE / 2;
+            const centerY = loupeY + LOUPE_SIZE / 2;
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+            ctx.beginPath();
+            ctx.moveTo(centerX - 15, centerY);
+            ctx.lineTo(centerX + 15, centerY);
+            ctx.moveTo(centerX, centerY - 15);
+            ctx.lineTo(centerX, centerY + 15);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
         }
-
-        return { drawWidth, drawHeight, offsetX, offsetY, rect: r };
     }
 
     function onFramingTouchStart(e) {
@@ -273,15 +321,11 @@
         e.preventDefault();
         const t = e.touches[0];
         const img = getImageRect();
-        
-        // Пересчитываем координаты касания в пиксели canvas, учитывая letterboxing
         const scaleX = canvas.width / img.drawWidth;
         const scaleY = canvas.height / img.drawHeight;
         const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
         const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
-        
         if (!corners) return;
-
         let bestIdx = -1;
         let bestDist = Infinity;
         for (let i = 0; i < corners.length; i++) {
@@ -304,12 +348,10 @@
         e.preventDefault();
         const t = e.touches[0];
         const img = getImageRect();
-        
         const scaleX = canvas.width / img.drawWidth;
         const scaleY = canvas.height / img.drawHeight;
         const sx = (t.clientX - img.rect.left - img.offsetX) * scaleX;
         const sy = (t.clientY - img.rect.top - img.offsetY) * scaleY;
-        
         corners[draggingCorner].x = Math.max(0, Math.min(canvas.width, sx));
         corners[draggingCorner].y = Math.max(0, Math.min(canvas.height, sy));
         drawFrozenScene();
